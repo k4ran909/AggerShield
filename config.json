@@ -1,0 +1,91 @@
+{
+  "listen": ":8080",
+  "upstream": "http://127.0.0.1:3000",
+
+  "trusted_proxies": [],
+  "allowlist": ["127.0.0.1/32", "::1/128"],
+  "denylist": [],
+  "bad_user_agents": [],
+
+  "watch_interval": "0s",
+  "dry_run": false,
+
+  "rate_limit": {
+    "per_ip_rps": 20,
+    "per_ip_burst": 40,
+    "global_rps": 5000,
+    "global_burst": 10000
+  },
+
+  "ban": {
+    "base_duration": "60s",
+    "max_duration": "1h",
+    "escalation_factor": 2.0,
+    "sweep_interval": "10s",
+    "max_entries": 1000000
+  },
+
+  "connection": {
+    "max_per_ip": 50,
+    "read_header_timeout": "5s",
+    "read_timeout": "15s",
+    "write_timeout": "20s",
+    "idle_timeout": "60s",
+    "max_header_bytes": 16384,
+    "max_body_bytes": 1048576
+  },
+
+  "challenge": {
+    "enabled": true,
+    "mode": "adaptive",
+    "difficulty_bits": 14,
+    "clearance_ttl": "30m",
+    "pressure_threshold": 0.25,
+    "challenge_non_browser": false,
+    "secret": ""
+  },
+
+  "block": {
+    "status": 403,
+    "message": "Forbidden"
+  },
+
+  "admin": {
+    "enabled": false,
+    "token": ""
+  },
+
+  "log": {
+    "level": "info",
+    "format": "text"
+  },
+
+  "tls": {
+    "enabled": false,
+    "https_listen": ":443",
+    "http_listen": ":80",
+    "redirect_http": true,
+    "cert_file": "",
+    "key_file": "",
+    "self_signed": false,
+    "auto_cert": {
+      "enabled": false,
+      "domains": [],
+      "email": "",
+      "cache_dir": "./acme-cache"
+    }
+  },
+
+  "minecraft": {
+    "enabled": false,
+    "listen": ":25565",
+    "upstream": "127.0.0.1:25566",
+    "max_conns_per_ip": 8,
+    "new_conns_per_sec": 5,
+    "new_conns_burst": 10,
+    "handshake_timeout": "5s",
+    "ban_on_abuse": true
+  },
+
+  "rules": []
+}

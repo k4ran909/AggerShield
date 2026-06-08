@@ -1,0 +1,32 @@
+{
+  "upstream": "http://127.0.0.1:3000",
+
+  "sites": [
+    { "host": "a.local", "upstream": "http://127.0.0.1:3000", "preserve_host": true },
+    { "host": "b.local", "upstream": "http://127.0.0.1:3001", "preserve_host": true }
+  ],
+
+  "tls": {
+    "enabled": true,
+    "self_signed": true,
+    "https_listen": ":8443",
+    "http_listen": ":8081",
+    "redirect_http": true
+  },
+
+  "trusted_proxies": [],
+  "allowlist": [],
+
+  "rate_limit": {
+    "per_ip_rps": 50,
+    "per_ip_burst": 50,
+    "global_rps": 1000,
+    "global_burst": 1000
+  },
+
+  "ban": { "base_duration": "30s", "max_duration": "5m", "escalation_factor": 2.0 },
+
+  "challenge": { "enabled": false },
+
+  "admin": { "enabled": false }
+}

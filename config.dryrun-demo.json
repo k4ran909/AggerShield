@@ -1,0 +1,26 @@
+{
+  "listen": ":8080",
+  "upstream": "http://127.0.0.1:3000",
+
+  "trusted_proxies": ["127.0.0.1/32", "::1/128"],
+  "denylist": ["10.10.10.0/24"],
+
+  "dry_run": true,
+
+  "rate_limit": {
+    "per_ip_rps": 2,
+    "per_ip_burst": 2,
+    "global_rps": 50,
+    "global_burst": 50
+  },
+
+  "ban": { "base_duration": "30s", "max_duration": "5m", "escalation_factor": 2.0 },
+
+  "challenge": { "enabled": false },
+
+  "admin": { "enabled": true, "token": "demo-admin-token" },
+
+  "rules": [
+    { "name": "block-wp-admin", "path_prefix": "/wp-admin", "action": "block" }
+  ]
+}

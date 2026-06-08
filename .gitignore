@@ -1,0 +1,28 @@
+# Binaries
+aggershield
+aggershield.exe
+/bin/
+/dist/
+
+# Go
+*.test
+*.out
+coverage.*
+
+# Editor / OS
+.vscode/
+.idea/
+*~
+.DS_Store
+Thumbs.db
+
+# Local overrides
+config.local.json
+
+# Runtime ACME / Let's Encrypt certificate cache
+/acme-cache/
+
+# Python
+__pycache__/
+*.pyc
+detector/model.joblib

@@ -1,0 +1,85 @@
+{
+  "listen": ":8080",
+  "upstream": "http://127.0.0.1:3000",
+
+  "trusted_proxies": ["127.0.0.1/32", "::1/128"],
+  "allowlist": [],
+  "denylist": ["10.10.10.0/24"],
+  "bad_user_agents": ["evilbot", "masscan", "zgrab"],
+
+  "watch_interval": "3s",
+
+  "rate_limit": {
+    "per_ip_rps": 5,
+    "per_ip_burst": 5,
+    "global_rps": 50,
+    "global_burst": 50
+  },
+
+  "ban": {
+    "base_duration": "30s",
+    "max_duration": "5m",
+    "escalation_factor": 2.0,
+    "sweep_interval": "5s",
+    "max_entries": 200000
+  },
+
+  "connection": {
+    "max_per_ip": 20,
+    "read_header_timeout": "5s",
+    "read_timeout": "15s",
+    "write_timeout": "20s",
+    "idle_timeout": "60s",
+    "max_header_bytes": 16384,
+    "max_body_bytes": 1048576
+  },
+
+  "challenge": {
+    "enabled": true,
+    "mode": "adaptive",
+    "difficulty_bits": 14,
+    "clearance_ttl": "30m",
+    "pressure_threshold": 0.25,
+    "secret": "demo-secret-change-me"
+  },
+
+  "block": {
+    "status": 403,
+    "message": "Blocked by AggerShield"
+  },
+
+  "admin": {
+    "enabled": true,
+    "token": "demo-admin-token"
+  },
+
+  "log": {
+    "level": "info",
+    "format": "text"
+  },
+
+  "rules": [
+    {
+      "name": "hard-block-scanners",
+      "path_prefix": "/wp-admin",
+      "action": "block"
+    },
+    {
+      "name": "always-allow-health",
+      "path_prefix": "/healthz",
+      "action": "allow"
+    },
+    {
+      "name": "challenge-login",
+      "path_regex": "^/login",
+      "methods": ["POST"],
+      "action": "challenge"
+    },
+    {
+      "name": "tight-limit-checkout",
+      "path_prefix": "/api/checkout",
+      "per_ip_rps": 2,
+      "per_ip_burst": 3
+    }
+  ]
+}
