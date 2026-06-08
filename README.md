@@ -75,6 +75,9 @@ Server-level `Read/ReadHeader/Write/Idle` timeouts form the front line against s
 - `internal/proxy` — multi-site host-routing reverse proxy (Host + forwarded headers)
 - `internal/tlsutil` — HTTPS termination (ACME/Let's Encrypt, cert files, or dev self-signed)
 - `internal/mcproxy` — protocol-aware Minecraft TCP proxy
+- `internal/license` — license key store + agent client (the licensing model)
+- `cmd/aggershield-server` — central control plane + admin dashboard
+- `client/` — agent installer scripts handed to users (`install.sh`/`.ps1`)
 - `internal/metrics` — atomic counters + `/aggershield/stats`
 - `detector/` — Python ML/anomaly control plane (EWMA + XGBoost/CICDDoS2019)
 - `cmd/origin` — demo backend; `cmd/flood` — demo load generator (incl. `-solve`)
@@ -158,6 +161,63 @@ signal, or `watch_interval` (auto-reload on file change). The guard reads its
 policy from an atomically-swapped snapshot, so reloads apply with zero
 downtime and no dropped connections. (Server-level timeouts and the challenge
 secret are the only restart-only settings.)
+
+## Run it as a service (licensing + central control plane)
+
+AggerShield can run as a **product you operate**: you host a central control
+plane, hand each user a **license key** + the agent, and manage everything from
+an admin dashboard. The protection logic ships as a compiled binary — users
+never get your source.
+
+```
+            your infrastructure                         customer's server
+   ┌──────────────────────────────┐              ┌───────────────────────────┐
+   │  aggershield-server           │  validate /  │  aggershield (agent)       │
+   │  • issues / revokes keys      │◄─ heartbeat ─┤  • runs in front of their  │
+   │  • admin dashboard (/admin)   │   (key auth) │    app, key-gated          │
+   │  • sees every agent + its IP  │              │  • fails closed if revoked │
+   └──────────────────────────────┘              └───────────────────────────┘
+```
+
+**1. Run the control plane (you):**
+
+```bash
+go run ./cmd/aggershield-server -admin-token "$(openssl rand -hex 16)"
+# dashboard at http://localhost:9000/admin  (Basic auth: any user, password = token)
+```
+
+The dashboard lists every key, its status, and the live agent using it — the
+**hostname, source IP, what it's protecting, last-seen, and request/ban
+counts**. Issue a key with the form; revoke with one click.
+
+**2. Give a user their key + the agent.** They run `client/install.sh`
+(or `install.ps1`) with their key:
+
+```bash
+AGS_KEY=agsk_… AGS_SERVER=https://license.you.com AGS_UPSTREAM=http://127.0.0.1:3000 ./install.sh
+```
+
+The agent validates the key on start and heartbeats every 30s. **Revoke the key
+in the dashboard and the agent fails closed (503) within one heartbeat** — your
+central kill switch. (`license.fail_open: true` flips this to keep serving
+unprotected instead.)
+
+Agent config block:
+
+```json
+"license": {
+  "enabled": true,
+  "server_url": "https://license.you.com",
+  "key": "agsk_…",
+  "heartbeat_interval": "30s",
+  "fail_open": false
+}
+```
+
+> Run both the control plane and the agent↔server link over **HTTPS** in
+> production (the server takes `-cert`/`-key`); keys are sent in a header.
+> Keys are stored only as SHA-256 hashes, so a leak of the data file can't be
+> replayed.
 
 ## Will it affect normal users?
 

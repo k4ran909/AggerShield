@@ -48,6 +48,7 @@ type Config struct {
 
 	TLS       TLS       `json:"tls"`
 	Minecraft Minecraft `json:"minecraft"`
+	License   License   `json:"license"`
 
 	RateLimit  RateLimit  `json:"rate_limit"`
 	Ban        Ban        `json:"ban"`
@@ -98,6 +99,23 @@ type TLS struct {
 	// cert_file/self_signed. Requires the box to be reachable from the
 	// internet on ports 80 (ACME HTTP-01 challenge) and 443.
 	AutoCert AutoCert `json:"auto_cert"`
+}
+
+// License turns the proxy into a licensed agent that checks in with a central
+// AggerShield control plane. When enabled and the key is invalid/revoked the
+// agent fails closed (stops serving) — unless FailOpen is set.
+type License struct {
+	Enabled   bool   `json:"enabled"`
+	ServerURL string `json:"server_url"` // control plane base URL
+	Key       string `json:"key"`        // this agent's license key (agsk_...)
+	// Protecting is a human label for the dashboard (what this agent guards).
+	// Defaults to the first site host or the upstream.
+	Protecting string `json:"protecting"`
+	// HeartbeatInterval is how often the agent reports status. Default 30s.
+	HeartbeatInterval Duration `json:"heartbeat_interval"`
+	// FailOpen keeps serving (unprotected-licensing) if the key can't be
+	// confirmed. Default false = fail closed (revoked key => stop serving).
+	FailOpen bool `json:"fail_open"`
 }
 
 // Minecraft enables a protocol-aware TCP proxy in front of a Minecraft
@@ -373,6 +391,9 @@ func (c *Config) applyDefaults() {
 	if c.Minecraft.HandshakeTimeout == 0 {
 		c.Minecraft.HandshakeTimeout = Duration(5 * time.Second)
 	}
+	if c.License.HeartbeatInterval == 0 {
+		c.License.HeartbeatInterval = Duration(30 * time.Second)
+	}
 }
 
 func (c *Config) validate() error {
@@ -392,6 +413,9 @@ func (c *Config) validate() error {
 	}
 	if c.Minecraft.Enabled && c.Minecraft.Upstream == "" {
 		return fmt.Errorf("config: minecraft.enabled requires minecraft.upstream")
+	}
+	if c.License.Enabled && (c.License.ServerURL == "" || c.License.Key == "") {
+		return fmt.Errorf("config: license.enabled requires server_url and key")
 	}
 	for i, r := range c.Rules {
 		switch r.Action {

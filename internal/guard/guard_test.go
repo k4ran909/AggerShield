@@ -235,6 +235,29 @@ func TestChallengeSkipsNonBrowserByDefault(t *testing.T) {
 	}
 }
 
+func TestLicenseGateFailsClosed(t *testing.T) {
+	cfg := &config.Config{Upstream: "http://x"}
+	cfg.RateLimit.PerIPRPS, cfg.RateLimit.PerIPBurst = 1000, 1000
+	g := buildGuard(t, cfg, nil, false)
+	g.EnforceLicense() // licensed defaults to false
+	h := g.Wrap(okHandler())
+
+	// Unlicensed -> 503, traffic refused.
+	if code := send(t, h, http.MethodGet, "/", "203.0.113.1", ""); code != http.StatusServiceUnavailable {
+		t.Fatalf("unlicensed agent should return 503, got %d", code)
+	}
+	// Once licensed, traffic flows.
+	g.SetLicensed(true)
+	if code := send(t, h, http.MethodGet, "/", "203.0.113.1", ""); code != http.StatusOK {
+		t.Fatalf("licensed agent should serve, got %d", code)
+	}
+	// Revoked again -> blocked.
+	g.SetLicensed(false)
+	if code := send(t, h, http.MethodGet, "/", "203.0.113.1", ""); code != http.StatusServiceUnavailable {
+		t.Fatalf("revoked agent should return 503, got %d", code)
+	}
+}
+
 func TestBanEscalation(t *testing.T) {
 	bans := banlist.New(time.Second, time.Hour, 2.0, time.Hour, 1000, nil)
 	defer bans.Close()

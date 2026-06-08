@@ -1,6 +1,12 @@
 # Binaries
 aggershield
 aggershield.exe
+aggershield-server
+aggershield-server.exe
+origin
+origin.exe
+flood
+flood.exe
 /bin/
 /dist/
 
@@ -18,6 +24,18 @@ Thumbs.db
 
 # Local overrides
 config.local.json
+
+# Control-plane license data (hashed keys + telemetry) — never commit
+aggershield-license.json
+*-license.json
+*-license.json.tmp
+
+# Agent config written by the client installer
+aggershield.config.json
+demo-agent.config.json
+
+# Local Claude Code settings (machine-specific)
+.claude/settings.local.json
 
 # Runtime ACME / Let's Encrypt certificate cache
 /acme-cache/

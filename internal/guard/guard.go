@@ -50,6 +50,12 @@ type Guard struct {
 
 	// snap is the current policy snapshot, swapped atomically on reload.
 	snap atomic.Pointer[policy.Snapshot]
+
+	// Licensing (fail-closed). When licenseEnforced is true and licensed is
+	// false, the proxy refuses to serve (503). Both are no-ops when the agent
+	// runs unlicensed (standalone mode).
+	licenseEnforced bool
+	licensed        atomic.Bool
 }
 
 // Deps bundles the long-lived components.
@@ -97,6 +103,14 @@ func (g *Guard) Reload(cfg *config.Config) error {
 	return nil
 }
 
+// EnforceLicense turns on the fail-closed license gate. Until SetLicensed(true)
+// is called, proxied traffic is refused with 503.
+func (g *Guard) EnforceLicense() { g.licenseEnforced = true }
+
+// SetLicensed updates the live license state (called by the license agent on
+// each validate/heartbeat result).
+func (g *Guard) SetLicensed(ok bool) { g.licensed.Store(ok) }
+
 // SetChallengeMode flips challenge mode at runtime — e.g. an external detector
 // switching to "always" (under-attack mode) when it spots an anomaly, then
 // back to "adaptive" when it clears. It shallow-copies the current snapshot
@@ -115,6 +129,15 @@ func (g *Guard) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s := g.snap.Load()
 		g.metrics.Total.Add(1)
+
+		// 1. License gate (fail-closed). A revoked/unconfirmed key stops the
+		// proxy from serving — this is the operator's central kill switch.
+		if g.licenseEnforced && !g.licensed.Load() {
+			w.Header().Set("Retry-After", "60")
+			http.Error(w, "Service unavailable (unlicensed)", http.StatusServiceUnavailable)
+			return
+		}
+
 		ip := netutil.ClientIP(r, s.Trusted)
 		// Make the resolved client IP available to the proxy so it can set
 		// X-Real-IP / X-Forwarded-For for the origin (correct even if we sit
