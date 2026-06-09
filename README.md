@@ -1,6 +1,10 @@
 # 🛡️ AggerShield
 
-A cross-platform **Layer-7 (application-layer) DDoS protection reverse proxy**, written in Go with **zero external dependencies**. It sits in front of a web app, ecommerce site, or game-server web panel and absorbs application-layer abuse — HTTP floods, slow attacks, and noisy sources — before they reach your backend.
+![CI](https://github.com/k4ran909/AggerShield/actions/workflows/ci.yml/badge.svg)
+
+A cross-platform **Layer-7 (application-layer) DDoS protection reverse proxy**, written in Go (standard library only — the one external dependency, `x/crypto`, is used solely for optional ACME/Let's Encrypt auto-HTTPS). It sits in front of a web app, ecommerce site, or game-server web panel and absorbs application-layer abuse — HTTP floods, slow attacks, and noisy sources — before they reach your backend.
+
+**Data-plane performance:** ~**522 ns/request** through the full guard pipeline (≈1.9M req/s per core, single-threaded; `go test -bench=. ./internal/guard`).
 
 > **Scope, stated honestly.** A piece of software running on (or in front of) your server **cannot stop a volumetric L3/L4 flood.** If a botnet throws 500 Gbps at a 1–10 Gbps uplink, the pipe is saturated *upstream of you* — no host-based tool can fix a full pipe. That class of attack is handled at the network edge (OVH VAC, Cloudflare, AWS Shield, BGP blackholing). AggerShield defends the layer it actually can: **L7 + connection level.** For volumetric protection, pair it with an upstream scrubber.
 
@@ -214,10 +218,12 @@ Agent config block:
 }
 ```
 
-> Run both the control plane and the agent↔server link over **HTTPS** in
-> production (the server takes `-cert`/`-key`); keys are sent in a header.
-> Keys are stored only as SHA-256 hashes, so a leak of the data file can't be
-> replayed.
+> **Hardening built in:** agent endpoints (`/validate`, `/heartbeat`) are
+> per-IP rate-limited (`-agent-rps`/`-agent-burst`) so bad keys can't abuse the
+> control plane; keys are stored only as SHA-256 hashes (a data-file leak can't
+> be replayed); the admin token compares in constant time. Run the control
+> plane over **HTTPS** in production (the server takes `-cert`/`-key`, and warns
+> on startup if TLS is off) — keys travel in a header.
 
 ## Will it affect normal users?
 
@@ -425,6 +431,12 @@ next:
 2. **Behavioral fingerprinting** — JA3/JA4 TLS + HTTP/2 frame fingerprints to catch real-browser bots.
 3. **Tarpitting** — hold malicious connections slow instead of cleanly rejecting (cost asymmetry).
 4. **Upstream scrubbing integration** — OVH / Cloudflare / BGP blackhole APIs for the volumetric layer AggerShield can't absorb locally.
+
+## License
+
+Proprietary / source-available — see [LICENSE](LICENSE). You may read and
+evaluate the code; production, commercial, or hosted-service use needs written
+permission. (Swap in MIT/Apache if you decide to open-source it.)
 
 ## Disclaimer
 

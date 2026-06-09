@@ -19,7 +19,7 @@ import (
 func quietLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
 // buildGuard wires a Guard from a config, with challenges optionally enabled.
-func buildGuard(t *testing.T, cfg *config.Config, allowlist []string, withChallenge bool) *Guard {
+func buildGuard(t testing.TB, cfg *config.Config, allowlist []string, withChallenge bool) *Guard {
 	t.Helper()
 	cfg.RateLimit.GlobalRPS, cfg.RateLimit.GlobalBurst = 1e9, 1e9 // effectively unlimited
 	if cfg.Ban.MaxEntries == 0 {
@@ -47,7 +47,7 @@ func buildGuard(t *testing.T, cfg *config.Config, allowlist []string, withChalle
 	}, snap)
 }
 
-func send(t *testing.T, h http.Handler, method, path, ip, ua string) int {
+func send(t testing.TB, h http.Handler, method, path, ip, ua string) int {
 	t.Helper()
 	req := httptest.NewRequest(method, path, nil)
 	req.RemoteAddr = ip + ":1234"
@@ -266,5 +266,39 @@ func TestBanEscalation(t *testing.T) {
 	d3 := bans.Ban("192.0.2.1")
 	if !(d1 < d2 && d2 < d3) {
 		t.Fatalf("expected escalating ban durations, got %v, %v, %v", d1, d2, d3)
+	}
+}
+
+// nopRW is a discarding ResponseWriter so the benchmark measures the guard
+// pipeline, not the recorder.
+type nopRW struct{ h http.Header }
+
+func (n *nopRW) Header() http.Header {
+	if n.h == nil {
+		n.h = http.Header{}
+	}
+	return n.h
+}
+func (n *nopRW) Write(b []byte) (int, error) { return len(b), nil }
+func (n *nopRW) WriteHeader(int)             {}
+
+// BenchmarkGuardAllowPath measures the full pipeline for an allowed request
+// (the common case): IP resolution, allowlist/deny/rule checks, global +
+// per-IP rate limiters, and the concurrency cap.
+func BenchmarkGuardAllowPath(b *testing.B) {
+	cfg := &config.Config{Upstream: "http://x"}
+	cfg.RateLimit.PerIPRPS, cfg.RateLimit.PerIPBurst = 1e9, 1e9
+	cfg.Connection.MaxBodyBytes = 1 << 20
+	g := buildGuard(b, cfg, nil, false)
+	h := g.Wrap(okHandler())
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "203.0.113.5:1234"
+	w := &nopRW{}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		h.ServeHTTP(w, req)
 	}
 }

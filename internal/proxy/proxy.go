@@ -24,9 +24,9 @@ import (
 
 // Router forwards requests to origins selected by Host.
 type Router struct {
-	sites   map[string]http.Handler // host (lower, no port) -> origin proxy
-	def     http.Handler            // fallback for unmatched hosts
-	log     *slog.Logger
+	sites map[string]http.Handler // host (lower, no port) -> origin proxy
+	def   http.Handler            // fallback for unmatched hosts
+	log   *slog.Logger
 }
 
 // New builds a Router from config: one entry per Sites[], plus the default
@@ -74,8 +74,8 @@ func newReverseProxy(upstream string, preserveHost bool, log *slog.Logger) (*htt
 	}
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.SetURL(target)      // scheme + host + base path
-			pr.SetXForwarded()     // X-Forwarded-For/Host/Proto from the inbound request
+			pr.SetURL(target)  // scheme + host + base path
+			pr.SetXForwarded() // X-Forwarded-For/Host/Proto from the inbound request
 			if preserveHost {
 				pr.Out.Host = pr.In.Host
 			} else {

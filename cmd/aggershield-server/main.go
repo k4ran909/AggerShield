@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"aggershield/internal/license"
+	"aggershield/internal/ratelimit"
 )
 
 const version = "0.1.0"
@@ -32,6 +33,9 @@ type server struct {
 	adminToken string
 	log        *slog.Logger
 	tmpl       *template.Template
+	// limiter throttles agent endpoints per source IP so a flood of bad keys
+	// can't abuse the control plane.
+	limiter *ratelimit.PerIP
 }
 
 func main() {
@@ -40,6 +44,8 @@ func main() {
 	adminToken := flag.String("admin-token", os.Getenv("AGGERSHIELD_ADMIN_TOKEN"), "admin dashboard token (or AGGERSHIELD_ADMIN_TOKEN)")
 	certFile := flag.String("cert", "", "TLS cert (optional)")
 	keyFile := flag.String("key", "", "TLS key (optional)")
+	agentRPS := flag.Float64("agent-rps", 10, "per-IP request/sec limit on agent endpoints")
+	agentBurst := flag.Float64("agent-burst", 20, "per-IP burst on agent endpoints")
 	flag.Parse()
 
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -59,12 +65,18 @@ func main() {
 		adminToken: *adminToken,
 		log:        log,
 		tmpl:       template.Must(template.New("dash").Funcs(tmplFuncs).Parse(dashboardHTML)),
+		limiter:    ratelimit.NewPerIP(*agentRPS, *agentBurst, 100000, 30*time.Second, 5*time.Minute),
+	}
+
+	if *certFile == "" {
+		log.Warn("running WITHOUT TLS — keys and the admin token travel in cleartext. " +
+			"Use -cert/-key (or put it behind an HTTPS reverse proxy) in production.")
 	}
 
 	mux := http.NewServeMux()
-	// Agent API (key-authenticated).
-	mux.HandleFunc("POST /api/v1/validate", s.handleValidate)
-	mux.HandleFunc("POST /api/v1/heartbeat", s.handleHeartbeat)
+	// Agent API (key-authenticated + per-IP rate limited).
+	mux.HandleFunc("POST /api/v1/validate", s.rateLimited(s.handleValidate))
+	mux.HandleFunc("POST /api/v1/heartbeat", s.rateLimited(s.handleHeartbeat))
 	// Admin JSON API (admin-token header).
 	mux.HandleFunc("GET /api/v1/admin/keys", s.adminJSON(s.handleKeysJSON))
 	mux.HandleFunc("GET /api/v1/admin/agents", s.adminJSON(s.handleAgentsJSON))
@@ -199,6 +211,18 @@ func (s *server) adminHTML(next http.HandlerFunc) http.HandlerFunc {
 		if !ok || subtle.ConstantTimeCompare([]byte(pass), []byte(s.adminToken)) != 1 {
 			w.Header().Set("WWW-Authenticate", `Basic realm="AggerShield admin"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}
+}
+
+// rateLimited throttles a handler per source IP (agent-endpoint abuse guard).
+func (s *server) rateLimited(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.limiter.Allow(hostOf(r.RemoteAddr)) {
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, "rate limited", http.StatusTooManyRequests)
 			return
 		}
 		next(w, r)

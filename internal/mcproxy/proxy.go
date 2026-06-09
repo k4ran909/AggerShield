@@ -21,9 +21,9 @@ type Proxy struct {
 	hsTO     time.Duration
 	banAbuse bool
 
-	bans     *banlist.Store        // shared with the HTTP guard
-	conns    *connlimit.Limiter    // concurrent connections per IP
-	connRate *ratelimit.PerIP      // new connections per IP per second
+	bans     *banlist.Store     // shared with the HTTP guard
+	conns    *connlimit.Limiter // concurrent connections per IP
+	connRate *ratelimit.PerIP   // new connections per IP per second
 	metrics  *metrics.Metrics
 	log      *slog.Logger
 

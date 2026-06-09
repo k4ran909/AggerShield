@@ -19,6 +19,7 @@
 //  7. Challenge gate -> PoW unless cleared (always, or adaptive under load).
 //  8. Global rate limit -> aggregate ceiling (distributed-flood defence).
 //  9. Per-IP rate limit -> over-budget source earns an escalating ban.
+//
 // 10. Per-IP concurrency cap -> blunts slow/connection-exhaustion attacks.
 // 11. Body size cap -> bounds memory per request.
 package guard

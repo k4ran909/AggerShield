@@ -1,0 +1,36 @@
+AggerShield — Proprietary, Source-Available License
+Copyright (c) 2026 k4ran909. All rights reserved.
+
+This source code is made available for the purposes of evaluation, learning,
+and reference only. By accessing or using this software you agree to the terms
+below.
+
+1. Permitted
+   - View, read, and study the source code.
+   - Build and run it locally for personal, non-commercial evaluation and
+     testing.
+
+2. Not permitted without prior written permission from the copyright holder
+   - Use in production, or for any commercial purpose.
+   - Redistribute, publish, sublicense, sell, rent, or offer it (or any
+     derivative) as a hosted or managed service.
+   - Remove or alter this license or the copyright notices.
+   - Create and distribute derivative works.
+
+3. No trademark or branding rights are granted in the name "AggerShield".
+
+4. Disclaimer
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING
+   FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+   IN THE SOFTWARE.
+
+5. Security / authorized use
+   AggerShield is a DEFENSIVE tool. Use it only to protect infrastructure you
+   own or are explicitly authorized to protect.
+
+For commercial licensing or permissions beyond this license, contact the
+copyright holder.
