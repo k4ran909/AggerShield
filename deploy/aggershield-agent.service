@@ -1,0 +1,33 @@
+[Unit]
+Description=AggerShield agent (L7 DDoS protection proxy)
+Documentation=https://github.com/k4ran909/AggerShield
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Install the binary at /usr/local/bin/aggershield and config at
+# /etc/aggershield/config.json. Create the user:  useradd --system aggershield
+ExecStart=/usr/local/bin/aggershield -config /etc/aggershield/config.json
+Restart=on-failure
+RestartSec=2s
+User=aggershield
+Group=aggershield
+
+# Allow binding :80/:443 without running as root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# Hardening.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/aggershield
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

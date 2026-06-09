@@ -225,6 +225,43 @@ Agent config block:
 > plane over **HTTPS** in production (the server takes `-cert`/`-key`, and warns
 > on startup if TLS is off) — keys travel in a header.
 
+## Build, deploy & observe
+
+**Get distributable binaries** (what you hand to users + run yourself):
+
+```bash
+make release        # cross-compiles agent + server for linux/darwin/windows → ./dist
+#   or on Windows:  ./build.ps1
+make build          # just this machine → ./bin
+make test           # go test -race ./...
+```
+
+A version tag triggers a full **GitHub Release** (binaries + checksums + archives
+bundling the client/ and deploy/ files) via GoReleaser:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+**Docker** (one image, both binaries):
+
+```bash
+docker build -t aggershield .
+docker run -p 8080:8080 -v "$PWD/config.json:/config.json" aggershield          # agent
+docker run -p 9000:9000 --entrypoint /usr/local/bin/aggershield-server \
+    -e AGGERSHIELD_ADMIN_TOKEN=secret aggershield                                # control plane
+```
+
+**systemd** units (with sandboxing + `CAP_NET_BIND_SERVICE` for :80/:443) are in
+[`deploy/`](deploy/) — `aggershield-agent.service` and `aggershield-server.service`.
+
+**Metrics:** both the agent and the control plane expose Prometheus metrics at
+`GET /metrics` (no client-library dependency). Scrape them with Prometheus and
+chart/alert in Grafana — e.g. alert on a spike in
+`aggershield_rate_limited_global_total` or when `aggershield_uptime_seconds`
+resets (an agent restarted/died). `GET /aggershield/stats` still serves the same
+data as JSON.
+
 ## Will it affect normal users?
 
 It's designed not to, and the defaults are conservative — but any DDoS filter

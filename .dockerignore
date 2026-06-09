@@ -1,0 +1,11 @@
+.git
+.github
+bin
+dist
+acme-cache
+*-license.json
+*.config.json
+detector/__pycache__
+**/*_test.go
+README.md
+Deep Analysis Report*.md

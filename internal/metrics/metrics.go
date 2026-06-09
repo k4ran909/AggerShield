@@ -3,7 +3,10 @@ package metrics
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -68,5 +71,37 @@ func (m *Metrics) Handler(trackedFn func() int) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(s)
+	}
+}
+
+// Prometheus returns an http.HandlerFunc serving the counters in Prometheus /
+// OpenMetrics text exposition format, so AggerShield plugs straight into
+// Prometheus + Grafana + Alertmanager. Rendered by hand (no client library) to
+// keep the dependency footprint minimal. trackedFn supplies the live ban count.
+func (m *Metrics) Prometheus(trackedFn func() int) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		var b strings.Builder
+		counter := func(name, help string, v int64) {
+			fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", name, help, name, name, v)
+		}
+		gauge := func(name, help string, v float64) {
+			fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s gauge\n%s %g\n", name, help, name, name, v)
+		}
+		counter("aggershield_requests_total", "Total requests seen", m.Total.Load())
+		counter("aggershield_allowed_total", "Requests passed to the upstream", m.Allowed.Load())
+		counter("aggershield_blocked_banned_total", "Requests blocked because the IP was banned", m.BlockedBanned.Load())
+		counter("aggershield_rate_limited_per_ip_total", "Requests over the per-IP limit", m.RateLimitedIP.Load())
+		counter("aggershield_rate_limited_global_total", "Requests shed by the global limiter", m.RateLimitedGl.Load())
+		counter("aggershield_connection_rejected_total", "Requests rejected by the per-IP concurrency cap", m.ConnRejected.Load())
+		counter("aggershield_bans_issued_total", "Bans issued", m.BansIssued.Load())
+		counter("aggershield_challenged_total", "Proof-of-work challenges served", m.Challenged.Load())
+		counter("aggershield_would_block_total", "Dry-run decisions that would have blocked", m.WouldBlock.Load())
+		counter("aggershield_mc_connections_total", "Minecraft connections seen", m.McConnTotal.Load())
+		counter("aggershield_mc_rejected_total", "Minecraft connections rejected", m.McConnRejected.Load())
+		gauge("aggershield_banned_ips", "Currently tracked banned IPs", float64(trackedFn()))
+		gauge("aggershield_uptime_seconds", "Process uptime in seconds", time.Since(m.startedAt).Seconds())
+
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		_, _ = io.WriteString(w, b.String())
 	}
 }

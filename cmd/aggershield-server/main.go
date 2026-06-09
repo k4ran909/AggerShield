@@ -15,6 +15,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"html/template"
 	"log/slog"
 	"net"
@@ -85,6 +86,7 @@ func main() {
 	mux.HandleFunc("POST /admin/keys", s.adminHTML(s.handleGenerate))
 	mux.HandleFunc("POST /admin/keys/revoke", s.adminHTML(s.handleRevoke))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+	mux.HandleFunc("GET /metrics", s.handleMetrics)
 
 	srv := &http.Server{
 		Addr:              *listen,
@@ -238,6 +240,24 @@ func (s *server) adminJSON(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+// handleMetrics serves control-plane counts in Prometheus text format.
+func (s *server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
+	keys := s.store.Keys()
+	var revoked, agents int
+	for _, k := range keys {
+		if k.Revoked {
+			revoked++
+		}
+		if s.store.Agent(k.ID) != nil {
+			agents++
+		}
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	fmt.Fprintf(w, "# TYPE aggershield_license_keys_total gauge\naggershield_license_keys_total %d\n", len(keys))
+	fmt.Fprintf(w, "# TYPE aggershield_license_keys_revoked gauge\naggershield_license_keys_revoked %d\n", revoked)
+	fmt.Fprintf(w, "# TYPE aggershield_license_agents_total gauge\naggershield_license_agents_total %d\n", agents)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
