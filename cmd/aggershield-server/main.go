@@ -21,6 +21,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"aggershield/internal/license"
@@ -85,6 +86,7 @@ func main() {
 	mux.HandleFunc("GET /admin", s.adminHTML(s.handleDashboard))
 	mux.HandleFunc("POST /admin/keys", s.adminHTML(s.handleGenerate))
 	mux.HandleFunc("POST /admin/keys/revoke", s.adminHTML(s.handleRevoke))
+	mux.HandleFunc("POST /admin/keys/policy", s.adminHTML(s.handleSetPolicy))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
 
@@ -114,7 +116,11 @@ func (s *server) handleValidate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, license.ValidateResp{Valid: false, Reason: "invalid or revoked key"})
 		return
 	}
-	writeJSON(w, http.StatusOK, license.ValidateResp{Valid: true, KeyID: key.ID, Name: key.Name})
+	doc, ver := s.store.Policy(key.ID)
+	writeJSON(w, http.StatusOK, license.ValidateResp{
+		Valid: true, KeyID: key.ID, Name: key.Name,
+		PolicyVersion: ver, Policy: doc,
+	})
 }
 
 func (s *server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +139,13 @@ func (s *server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		SourceIP:   hostOf(r.RemoteAddr),
 		Stats:      req.Stats,
 	})
-	writeJSON(w, http.StatusOK, license.HeartbeatResp{Licensed: true})
+	// Push the policy back only when it's newer than what the agent has.
+	resp := license.HeartbeatResp{Licensed: true}
+	if doc, ver := s.store.Policy(key.ID); ver != req.PolicyVersion {
+		resp.PolicyVersion = ver
+		resp.Policy = doc
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ---- Admin JSON ----
@@ -156,9 +168,11 @@ func (s *server) handleAgentsJSON(w http.ResponseWriter, _ *http.Request) {
 // ---- Admin dashboard ----
 
 type rowView struct {
-	Key   *license.Key
-	Agent *license.AgentStatus
-	Stale bool
+	Key           *license.Key
+	Agent         *license.AgentStatus
+	Stale         bool
+	PolicyVersion int
+	PolicyJSON    string
 }
 
 func (s *server) handleDashboard(w http.ResponseWriter, _ *http.Request) {
@@ -187,11 +201,43 @@ func (s *server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }
 
+// handleSetPolicy stores a per-key protection policy (pushed to the agent on
+// its next heartbeat). An empty body clears the policy to an empty doc.
+func (s *server) handleSetPolicy(w http.ResponseWriter, r *http.Request) {
+	id := r.FormValue("id")
+	if id == "" {
+		http.Error(w, "missing key id", http.StatusBadRequest)
+		return
+	}
+	var doc license.PolicyDoc
+	if raw := strings.TrimSpace(r.FormValue("policy")); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+			http.Error(w, "invalid policy JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	if _, err := s.store.SetPolicy(id, &doc); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+}
+
 func (s *server) render(w http.ResponseWriter, newKey, newKeyName string) {
 	rows := make([]rowView, 0)
 	for _, k := range s.store.Keys() {
 		a := s.store.Agent(k.ID)
-		rows = append(rows, rowView{Key: k, Agent: a, Stale: a != nil && time.Since(a.LastSeen) > 2*time.Minute})
+		doc, ver := s.store.Policy(k.ID)
+		pj := ""
+		if doc != nil {
+			if b, err := json.MarshalIndent(doc, "", "  "); err == nil {
+				pj = string(b)
+			}
+		}
+		rows = append(rows, rowView{
+			Key: k, Agent: a, Stale: a != nil && time.Since(a.LastSeen) > 2*time.Minute,
+			PolicyVersion: ver, PolicyJSON: pj,
+		})
 	}
 	data := map[string]any{
 		"Rows":       rows,

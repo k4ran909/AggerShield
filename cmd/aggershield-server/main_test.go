@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -88,6 +89,37 @@ func TestRevokedKeyHeartbeatUnlicensed(t *testing.T) {
 	_ = json.NewDecoder(rec.Body).Decode(&hr)
 	if rec.Code != http.StatusUnauthorized || hr.Licensed {
 		t.Fatalf("revoked key heartbeat should be unlicensed/401, got %d %+v", rec.Code, hr)
+	}
+}
+
+func TestHeartbeatPushesPolicyOnVersionChange(t *testing.T) {
+	s, key := newTestServer(t)
+	keyID := s.store.Keys()[0].ID
+	dr := true
+	if _, err := s.store.SetPolicy(keyID, &license.PolicyDoc{DryRun: &dr}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Agent reports version 0 -> server pushes the current policy (v1).
+	hb := func(agentVer int) license.HeartbeatResp {
+		body := strings.NewReader(`{"hostname":"h","policy_version":` + strconv.Itoa(agentVer) + `}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/heartbeat", body)
+		req.Header.Set(license.HeaderKey, key)
+		rec := httptest.NewRecorder()
+		s.handleHeartbeat(rec, req)
+		var resp license.HeartbeatResp
+		_ = json.NewDecoder(rec.Body).Decode(&resp)
+		return resp
+	}
+
+	r0 := hb(0)
+	if r0.Policy == nil || r0.PolicyVersion != 1 || r0.Policy.DryRun == nil || !*r0.Policy.DryRun {
+		t.Fatalf("agent at v0 should receive policy v1 with dry_run=true, got %+v", r0)
+	}
+	// Agent already at v1 -> no policy echoed back.
+	r1 := hb(1)
+	if r1.Policy != nil {
+		t.Fatalf("agent already at v1 should not receive a policy, got %+v", r1.Policy)
 	}
 }
 

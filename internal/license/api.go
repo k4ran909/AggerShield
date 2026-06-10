@@ -15,26 +15,35 @@ const (
 	KeyPrefix = "agsk_"
 )
 
-// ValidateResp is returned from POST /api/v1/validate.
+// ValidateResp is returned from POST /api/v1/validate. It carries the current
+// pushed policy (if any) so the agent can apply it immediately at startup.
 type ValidateResp struct {
-	Valid  bool   `json:"valid"`
-	KeyID  string `json:"key_id,omitempty"`
-	Name   string `json:"name,omitempty"`
-	Reason string `json:"reason,omitempty"`
+	Valid         bool       `json:"valid"`
+	KeyID         string     `json:"key_id,omitempty"`
+	Name          string     `json:"name,omitempty"`
+	Reason        string     `json:"reason,omitempty"`
+	PolicyVersion int        `json:"policy_version,omitempty"`
+	Policy        *PolicyDoc `json:"policy,omitempty"`
 }
 
-// HeartbeatReq is the periodic status an agent reports.
+// HeartbeatReq is the periodic status an agent reports. PolicyVersion is the
+// version the agent currently has applied, so the server only sends a policy
+// back when it has changed.
 type HeartbeatReq struct {
-	Hostname   string           `json:"hostname"`
-	Version    string           `json:"version"`
-	Protecting string           `json:"protecting"` // what the agent guards (site/upstream)
-	ReportedIP string           `json:"reported_ip,omitempty"`
-	Stats      map[string]int64 `json:"stats,omitempty"`
+	Hostname      string           `json:"hostname"`
+	Version       string           `json:"version"`
+	Protecting    string           `json:"protecting"` // what the agent guards (site/upstream)
+	ReportedIP    string           `json:"reported_ip,omitempty"`
+	PolicyVersion int              `json:"policy_version,omitempty"`
+	Stats         map[string]int64 `json:"stats,omitempty"`
 }
 
 // HeartbeatResp tells the agent whether it is still licensed. A revoked key
 // returns Licensed=false, which (fail-closed) makes the agent stop serving.
+// Policy is set only when the server's policy version differs from the agent's.
 type HeartbeatResp struct {
-	Licensed bool   `json:"licensed"`
-	Reason   string `json:"reason,omitempty"`
+	Licensed      bool       `json:"licensed"`
+	Reason        string     `json:"reason,omitempty"`
+	PolicyVersion int        `json:"policy_version,omitempty"`
+	Policy        *PolicyDoc `json:"policy,omitempty"`
 }

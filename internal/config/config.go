@@ -291,6 +291,10 @@ func Load(path string) (*Config, error) {
 	return &c, nil
 }
 
+// Normalize fills in default values for any unset fields. Use it after merging
+// a partially-specified policy so zero values get sane defaults.
+func (c *Config) Normalize() { c.applyDefaults() }
+
 func (c *Config) applyDefaults() {
 	if c.Listen == "" {
 		c.Listen = ":8080"

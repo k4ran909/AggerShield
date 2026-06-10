@@ -39,8 +39,9 @@ type AgentStatus struct {
 }
 
 type data struct {
-	Keys   map[string]*Key         `json:"keys"`   // by key ID
-	Agents map[string]*AgentStatus `json:"agents"` // by key ID
+	Keys     map[string]*Key          `json:"keys"`     // by key ID
+	Agents   map[string]*AgentStatus  `json:"agents"`   // by key ID
+	Policies map[string]*PolicyRecord `json:"policies"` // by key ID
 }
 
 // Store is a concurrency-safe, file-backed license store.
@@ -55,7 +56,7 @@ type Store struct {
 func Open(path string) (*Store, error) {
 	s := &Store{
 		path:   path,
-		d:      &data{Keys: map[string]*Key{}, Agents: map[string]*AgentStatus{}},
+		d:      &data{Keys: map[string]*Key{}, Agents: map[string]*AgentStatus{}, Policies: map[string]*PolicyRecord{}},
 		byHash: map[string]string{},
 	}
 	raw, err := os.ReadFile(path)
@@ -73,6 +74,9 @@ func Open(path string) (*Store, error) {
 	}
 	if s.d.Agents == nil {
 		s.d.Agents = map[string]*AgentStatus{}
+	}
+	if s.d.Policies == nil {
+		s.d.Policies = map[string]*PolicyRecord{}
 	}
 	for _, k := range s.d.Keys {
 		s.byHash[k.Hash] = k.ID

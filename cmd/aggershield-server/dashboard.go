@@ -51,7 +51,7 @@ form.inline{display:inline}.row-form{display:flex;gap:8px;flex-wrap:wrap;align-i
   <table>
     <thead><tr>
       <th>Name</th><th>Key ID</th><th>Status</th><th>Agent</th>
-      <th>Protecting</th><th>Source IP</th><th>Last seen</th><th>Requests / Bans</th><th></th>
+      <th>Protecting</th><th>Source IP</th><th>Last seen</th><th>Requests / Bans</th><th>Policy</th><th></th>
     </tr></thead>
     <tbody>
     {{range .Rows}}
@@ -64,6 +64,17 @@ form.inline{display:inline}.row-form{display:flex;gap:8px;flex-wrap:wrap;align-i
         <td class="mono">{{if .Agent}}{{.Agent.SourceIP}}{{end}}</td>
         <td>{{if .Agent}}{{if .Stale}}<span class="pill stale">{{since .Agent.LastSeen}}</span>{{else}}<span class="pill ok">{{since .Agent.LastSeen}}</span>{{end}}{{end}}</td>
         <td class="mono">{{stat .Agent "total_requests"}} / {{stat .Agent "bans_issued"}}</td>
+        <td>
+          <details>
+            <summary class="mut">v{{.PolicyVersion}} · edit</summary>
+            <form method="post" action="/admin/keys/policy" style="margin-top:8px">
+              <input type="hidden" name="id" value="{{.Key.ID}}">
+              <textarea name="policy" rows="8" cols="38" placeholder='{"dry_run":true}' class="mono"
+                style="display:block;background:#0b0d11;border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:8px;width:22rem">{{.PolicyJSON}}</textarea>
+              <button type="submit" style="margin-top:6px">Push policy</button>
+            </form>
+          </details>
+        </td>
         <td>{{if not .Key.Revoked}}
           <form class="inline" method="post" action="/admin/keys/revoke" onsubmit="return confirm('Revoke this key? The agent will stop serving.')">
             <input type="hidden" name="id" value="{{.Key.ID}}">
@@ -72,7 +83,7 @@ form.inline{display:inline}.row-form{display:flex;gap:8px;flex-wrap:wrap;align-i
         {{end}}</td>
       </tr>
     {{else}}
-      <tr><td colspan="9" class="mut">No keys yet — issue one above.</td></tr>
+      <tr><td colspan="10" class="mut">No keys yet — issue one above.</td></tr>
     {{end}}
     </tbody>
   </table>

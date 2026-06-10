@@ -218,6 +218,26 @@ Agent config block:
 }
 ```
 
+### Push protection policy from the dashboard
+
+You don't have to edit a customer's config to tune their protection — push a
+**policy** to their key from the control plane and the agent applies it live on
+its next heartbeat (no redeploy, no restart). Each key's row in `/admin` has a
+**policy editor**: paste a partial JSON policy and hit "Push policy".
+
+```json
+{ "dry_run": true,
+  "rules": [{ "name": "block-admin", "path_prefix": "/wp-admin", "action": "block" }],
+  "rate_limit": { "per_ip_rps": 10, "per_ip_burst": 20 } }
+```
+
+Only the fields you set are overridden; everything else stays as the agent's
+local config. Deployment/wiring (`listen`, `upstream`, `tls`, the license key,
+the challenge secret) is **never** pushable — only protection settings
+(rate limits, bans, challenge, rules, denylist, bad-UAs, block response,
+`dry_run`). Each change bumps a version; agents apply it only when it moves, and
+the policy persists on the control plane.
+
 > **Hardening built in:** agent endpoints (`/validate`, `/heartbeat`) are
 > per-IP rate-limited (`-agent-rps`/`-agent-burst`) so bad keys can't abuse the
 > control plane; keys are stored only as SHA-256 hashes (a data-file leak can't
