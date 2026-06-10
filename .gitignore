@@ -1,12 +1,13 @@
-# Binaries
-aggershield
-aggershield.exe
-aggershield-server
-aggershield-server.exe
-origin
-origin.exe
-flood
-flood.exe
+# Binaries — anchored to repo root so these do NOT match the cmd/<name>/
+# source directories (a bare "aggershield" would ignore cmd/aggershield/!).
+/aggershield
+/aggershield.exe
+/aggershield-server
+/aggershield-server.exe
+/origin
+/origin.exe
+/flood
+/flood.exe
 /bin/
 /dist/
 
@@ -32,7 +33,12 @@ aggershield-license.json
 
 # Agent config written by the client installer
 aggershield.config.json
-demo-agent.config.json
+demo-*.json
+
+# Persisted ban snapshots
+bans.json
+*-bans.json
+*-bans.json.tmp
 
 # Local Claude Code settings (machine-specific)
 .claude/settings.local.json

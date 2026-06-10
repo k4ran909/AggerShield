@@ -38,6 +38,9 @@ type server struct {
 	// limiter throttles agent endpoints per source IP so a flood of bad keys
 	// can't abuse the control plane.
 	limiter *ratelimit.PerIP
+	// Fleet blocklist tuning.
+	fleetTTL time.Duration
+	fleetMax int
 }
 
 func main() {
@@ -48,6 +51,8 @@ func main() {
 	keyFile := flag.String("key", "", "TLS key (optional)")
 	agentRPS := flag.Float64("agent-rps", 10, "per-IP request/sec limit on agent endpoints")
 	agentBurst := flag.Float64("agent-burst", 20, "per-IP burst on agent endpoints")
+	fleetTTL := flag.Duration("fleet-ban-ttl", time.Hour, "how long a fleet-shared ban lives")
+	fleetMax := flag.Int("fleet-max", 10000, "max IPs in the fleet blocklist")
 	flag.Parse()
 
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -68,6 +73,8 @@ func main() {
 		log:        log,
 		tmpl:       template.Must(template.New("dash").Funcs(tmplFuncs).Parse(dashboardHTML)),
 		limiter:    ratelimit.NewPerIP(*agentRPS, *agentBurst, 100000, 30*time.Second, 5*time.Minute),
+		fleetTTL:   *fleetTTL,
+		fleetMax:   *fleetMax,
 	}
 
 	if *certFile == "" {
@@ -139,11 +146,21 @@ func (s *server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		SourceIP:   hostOf(r.RemoteAddr),
 		Stats:      req.Stats,
 	})
-	// Push the policy back only when it's newer than what the agent has.
+	// Ingest any IPs this agent banned into the shared fleet blocklist.
+	if len(req.RecentBans) > 0 {
+		_ = s.store.AddFleetBans(req.RecentBans, s.fleetTTL, s.fleetMax)
+	}
+
 	resp := license.HeartbeatResp{Licensed: true}
+	// Push the policy back only when it's newer than what the agent has.
 	if doc, ver := s.store.Policy(key.ID); ver != req.PolicyVersion {
 		resp.PolicyVersion = ver
 		resp.Policy = doc
+	}
+	// Push the fleet blocklist back only when its version moved.
+	if ips, ver := s.store.FleetBlocklist(); ver != req.BlocklistVersion {
+		resp.BlocklistVersion = ver
+		resp.Blocklist = ips
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

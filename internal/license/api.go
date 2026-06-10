@@ -36,6 +36,10 @@ type HeartbeatReq struct {
 	ReportedIP    string           `json:"reported_ip,omitempty"`
 	PolicyVersion int              `json:"policy_version,omitempty"`
 	Stats         map[string]int64 `json:"stats,omitempty"`
+	// RecentBans are IPs this agent banned since its last heartbeat (fleet
+	// sharing). BlocklistVersion is the fleet blocklist version it has applied.
+	RecentBans       []string `json:"recent_bans,omitempty"`
+	BlocklistVersion int      `json:"blocklist_version,omitempty"`
 }
 
 // HeartbeatResp tells the agent whether it is still licensed. A revoked key
@@ -46,4 +50,9 @@ type HeartbeatResp struct {
 	Reason        string     `json:"reason,omitempty"`
 	PolicyVersion int        `json:"policy_version,omitempty"`
 	Policy        *PolicyDoc `json:"policy,omitempty"`
+	// Blocklist is the fleet blocklist, sent (non-nil, possibly empty) only when
+	// its version differs from the agent's reported BlocklistVersion. A nil
+	// Blocklist means "unchanged, nothing to apply".
+	BlocklistVersion int      `json:"blocklist_version,omitempty"`
+	Blocklist        []string `json:"blocklist"`
 }

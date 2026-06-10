@@ -116,6 +116,10 @@ type License struct {
 	// FailOpen keeps serving (unprotected-licensing) if the key can't be
 	// confirmed. Default false = fail closed (revoked key => stop serving).
 	FailOpen bool `json:"fail_open"`
+	// FleetBans opts into shared threat intel: this agent reports IPs it bans
+	// to the control plane and applies the fleet blocklist it gets back, so an
+	// IP banned on any agent is blocked across the fleet.
+	FleetBans bool `json:"fleet_bans"`
 }
 
 // Minecraft enables a protocol-aware TCP proxy in front of a Minecraft
@@ -243,6 +247,9 @@ type Ban struct {
 	// MaxEntries caps tracked IPs so the ban table can't itself be a
 	// memory-exhaustion DoS when flooded with unique/spoofed sources.
 	MaxEntries int `json:"max_entries"`
+	// PersistPath, if set, snapshots active bans to this file so they survive
+	// a restart (loaded on startup, saved periodically + on shutdown).
+	PersistPath string `json:"persist_path"`
 }
 
 // Connection holds slow-attack and connection-exhaustion protections.

@@ -12,14 +12,20 @@
 package banlist
 
 import (
+	"encoding/json"
 	"math"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"aggershield/internal/netutil"
 )
+
+// recentCap bounds the buffer of locally-issued bans awaiting report to the
+// control plane (fleet sharing).
+const recentCap = 1024
 
 type entry struct {
 	expires  time.Time
@@ -43,6 +49,16 @@ type Store struct {
 	// forget keeps offence history around past expiry so escalation works
 	// for IPs that return, while still bounding memory.
 	forget time.Duration
+
+	// recent buffers IPs banned locally (by Ban/BanFor) since the last drain,
+	// so the agent can report them to the control plane for fleet sharing.
+	// Fleet-applied bans (BanFleet) are deliberately NOT recorded, to avoid an
+	// echo loop between agents.
+	recent []string
+
+	// persistPath, if set, is where active bans are snapshotted so they
+	// survive a restart.
+	persistPath string
 
 	stop chan struct{}
 }
@@ -115,6 +131,7 @@ func (s *Store) BanFor(ip string, d time.Duration) bool {
 	}
 	e.offenses++
 	e.expires = now.Add(d)
+	s.recordRecentLocked(ip)
 	return true
 }
 
@@ -184,7 +201,61 @@ func (s *Store) Ban(ip string) time.Duration {
 		d = s.max
 	}
 	e.expires = now.Add(d)
+	s.recordRecentLocked(ip)
 	return d
+}
+
+// recordRecentLocked appends a locally-banned IP to the report buffer. Caller
+// must hold s.mu.
+func (s *Store) recordRecentLocked(ip string) {
+	if len(s.recent) >= recentCap {
+		// Bound memory: drop the oldest half.
+		s.recent = append(s.recent[:0:0], s.recent[recentCap/2:]...)
+	}
+	s.recent = append(s.recent, ip)
+}
+
+// DrainRecent returns and clears the IPs banned locally since the last call
+// (deduped), for the agent to report to the control plane.
+func (s *Store) DrainRecent() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.recent) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(s.recent))
+	out := make([]string, 0, len(s.recent))
+	for _, ip := range s.recent {
+		if _, ok := seen[ip]; !ok {
+			seen[ip] = struct{}{}
+			out = append(out, ip)
+		}
+	}
+	s.recent = nil
+	return out
+}
+
+// BanFleet applies a fleet ban pushed from the control plane: a fixed-duration
+// ban that does NOT escalate offences and is NOT recorded for re-reporting
+// (avoiding an echo loop). Allowlisted IPs are still never banned.
+func (s *Store) BanFleet(ip string, d time.Duration) {
+	if s.IsAllowed(ip) {
+		return
+	}
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.banned[ip]
+	if !ok {
+		if len(s.banned) >= s.maxEntries {
+			s.evictLocked(now)
+		}
+		e = &entry{}
+		s.banned[ip] = e
+	}
+	if exp := now.Add(d); exp.After(e.expires) {
+		e.expires = exp
+	}
 }
 
 // Count returns the number of tracked entries (banned + recently remembered).
@@ -196,6 +267,83 @@ func (s *Store) Count() int {
 
 // Close stops the sweeper goroutine.
 func (s *Store) Close() { close(s.stop) }
+
+// persistRecord is the on-disk form of a ban.
+type persistRecord struct {
+	Expires  time.Time `json:"expires"`
+	Offenses int       `json:"offenses"`
+}
+
+// EnablePersistence loads any saved bans from path and starts snapshotting
+// active bans there every interval (and once more on Close), so bans survive a
+// restart.
+func (s *Store) EnablePersistence(path string, interval time.Duration) error {
+	s.persistPath = path
+	if err := s.load(); err != nil {
+		return err
+	}
+	go s.persistLoop(interval)
+	return nil
+}
+
+func (s *Store) load() error {
+	raw, err := os.ReadFile(s.persistPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var recs map[string]persistRecord
+	if err := json.Unmarshal(raw, &recs); err != nil {
+		return err
+	}
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for ip, r := range recs {
+		if r.Expires.After(now) && len(s.banned) < s.maxEntries {
+			s.banned[ip] = &entry{expires: r.Expires, offenses: r.Offenses}
+		}
+	}
+	return nil
+}
+
+func (s *Store) snapshot() error {
+	now := time.Now()
+	s.mu.Lock()
+	recs := make(map[string]persistRecord, len(s.banned))
+	for ip, e := range s.banned {
+		if e.expires.After(now) {
+			recs[ip] = persistRecord{Expires: e.expires, Offenses: e.offenses}
+		}
+	}
+	s.mu.Unlock()
+
+	raw, err := json.MarshalIndent(recs, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := s.persistPath + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.persistPath)
+}
+
+func (s *Store) persistLoop(interval time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-s.stop:
+			_ = s.snapshot() // final save on shutdown
+			return
+		case <-t.C:
+			_ = s.snapshot()
+		}
+	}
+}
 
 func (s *Store) sweepLoop(interval time.Duration) {
 	t := time.NewTicker(interval)

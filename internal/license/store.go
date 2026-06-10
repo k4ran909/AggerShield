@@ -42,6 +42,11 @@ type data struct {
 	Keys     map[string]*Key          `json:"keys"`     // by key ID
 	Agents   map[string]*AgentStatus  `json:"agents"`   // by key ID
 	Policies map[string]*PolicyRecord `json:"policies"` // by key ID
+
+	// Fleet blocklist: IPs banned by any agent, shared to all. Map of IP ->
+	// expiry. Version moves when the set of IPs changes.
+	Fleet        map[string]time.Time `json:"fleet"`
+	FleetVersion int                  `json:"fleet_version"`
 }
 
 // Store is a concurrency-safe, file-backed license store.
@@ -56,7 +61,7 @@ type Store struct {
 func Open(path string) (*Store, error) {
 	s := &Store{
 		path:   path,
-		d:      &data{Keys: map[string]*Key{}, Agents: map[string]*AgentStatus{}, Policies: map[string]*PolicyRecord{}},
+		d:      &data{Keys: map[string]*Key{}, Agents: map[string]*AgentStatus{}, Policies: map[string]*PolicyRecord{}, Fleet: map[string]time.Time{}},
 		byHash: map[string]string{},
 	}
 	raw, err := os.ReadFile(path)
@@ -77,6 +82,9 @@ func Open(path string) (*Store, error) {
 	}
 	if s.d.Policies == nil {
 		s.d.Policies = map[string]*PolicyRecord{}
+	}
+	if s.d.Fleet == nil {
+		s.d.Fleet = map[string]time.Time{}
 	}
 	for _, k := range s.d.Keys {
 		s.byHash[k.Hash] = k.ID

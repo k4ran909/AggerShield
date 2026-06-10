@@ -218,6 +218,27 @@ Agent config block:
 }
 ```
 
+### Shared threat intel (fleet bans) + ban persistence
+
+Bans are normally in-memory and per-agent. Two opt-ins change that:
+
+- **`ban.persist_path`** — snapshot active bans to a file (atomic writes, every
+  30s + on shutdown) and reload them on startup, so **bans survive a restart**.
+- **`license.fleet_bans: true`** — the agent reports IPs it bans to the control
+  plane and applies the **fleet blocklist** it gets back. So an IP banned on
+  *any* agent is blocked across the whole fleet — a botnet IP that hits one
+  customer is pre-blocked for the rest.
+
+```
+agent A bans 1.2.3.4 ──heartbeat──► control plane (fleet blocklist, TTL'd, versioned)
+                                          │ heartbeat
+agent B (never saw 1.2.3.4) ◄─────────────┘  applies it → 1.2.3.4 blocked on B too
+```
+
+Fleet bans are TTL-bounded (`-fleet-ban-ttl`), capped (`-fleet-max`), versioned
+(agents apply only deltas), and don't escalate or re-report (no echo loop). The
+control plane persists the blocklist with the rest of its data.
+
 ### Push protection policy from the dashboard
 
 You don't have to edit a customer's config to tune their protection — push a
