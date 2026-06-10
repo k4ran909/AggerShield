@@ -15,6 +15,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"log/slog"
 	"net"
@@ -38,6 +39,7 @@ import (
 	"aggershield/internal/metrics"
 	"aggershield/internal/policy"
 	"aggershield/internal/proxy"
+	"aggershield/internal/scrubber"
 	"aggershield/internal/tlsutil"
 )
 
@@ -113,6 +115,33 @@ func main() {
 		return currentCfg
 	}
 
+	// Optional upstream/edge scrubber (engaged when under a volumetric attack).
+	scrubBackend := scrubber.New(cfg.Scrubber, log)
+	scrubFn := func(engage bool, reason string) error {
+		if scrubBackend == nil {
+			return errors.New("scrubber not configured")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		mx.ScrubActions.Add(1)
+		var err error
+		if engage {
+			err = scrubBackend.Engage(ctx, reason)
+		} else {
+			err = scrubBackend.Disengage(ctx)
+		}
+		if err != nil {
+			return err
+		}
+		if engage {
+			mx.ScrubEngaged.Store(1)
+		} else {
+			mx.ScrubEngaged.Store(0)
+		}
+		log.Info("upstream scrubber", "provider", scrubBackend.Name(), "engaged", engage, "reason", reason)
+		return nil
+	}
+
 	// Optional licensing: validate the key with the control plane and report
 	// telemetry. Fail-closed enforcement is handled inside the guard.
 	licCtx, licCancel := context.WithCancel(context.Background())
@@ -134,8 +163,8 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 	if cfg.Admin.Enabled {
-		admin.New(cfg.Admin.Token, *cfgPath, bans, reload, snapshotCfg, g.SetChallengeMode).Register(mux)
-		log.Info("admin API enabled", "routes", "/aggershield/admin/{bans,config,ban,unban,reload,mode}")
+		admin.New(cfg.Admin.Token, *cfgPath, bans, reload, snapshotCfg, g.SetChallengeMode, scrubFn).Register(mux)
+		log.Info("admin API enabled", "routes", "/aggershield/admin/{bans,config,ban,unban,reload,mode,scrub}")
 	}
 	mux.Handle("/", g.Wrap(router))
 

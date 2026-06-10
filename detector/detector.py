@@ -92,6 +92,7 @@ def main() -> None:
     ap.add_argument("--exit-ticks", type=int, default=5, help="calm ticks before relaxing")
     ap.add_argument("--backend", choices=["ewma", "model"], default="ewma")
     ap.add_argument("--model", default="model.joblib", help="model file for --backend model")
+    ap.add_argument("--scrub", action="store_true", help="also engage/disengage the upstream scrubber on attack/recovery")
     ap.add_argument("--dry-run", action="store_true", help="log decisions, don't act")
     ap.add_argument("--once", action="store_true", help="run a single tick and exit (testing)")
     args = ap.parse_args()
@@ -121,12 +122,16 @@ def main() -> None:
                 if attack:
                     if not attack_mode:
                         attack_mode = _set_mode(args, True)
+                        if args.scrub:
+                            _set_scrub(args, True, "anomaly score %.1f" % score)
                     calm = 0
                 elif attack_mode:
                     calm += 1
                     if calm >= args.exit_ticks:
                         if _set_mode(args, False):
                             attack_mode = False
+                            if args.scrub:
+                                _set_scrub(args, False, "")
                         calm = 0
             prev, prev_t = cur, now
         except (urllib.error.URLError, OSError) as e:
@@ -170,6 +175,20 @@ def _set_mode(args, attack: bool) -> bool:
     except urllib.error.URLError as e:
         print(f"[detector] failed to set mode: {e}")
         return not attack  # report unchanged on failure
+
+
+def _set_scrub(args, engage: bool, reason: str) -> None:
+    action = "engage" if engage else "disengage"
+    if args.dry_run:
+        print(f"[detector] DRY-RUN would {action} upstream scrubber")
+        return
+    try:
+        import urllib.parse
+        q = urllib.parse.urlencode({"action": action, "reason": reason})
+        r = post(f"{args.admin_url}/scrub?{q}", args.token)
+        print(f"[detector] >>> scrubber {action}: {r}")
+    except urllib.error.URLError as e:
+        print(f"[detector] failed to {action} scrubber: {e}")
 
 
 def _load_model(path: str):

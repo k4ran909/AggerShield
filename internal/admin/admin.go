@@ -36,10 +36,11 @@ type API struct {
 	cfgPath     string
 	snapshot    func() *config.Config // returns current effective config
 	setChalMode func(always bool)     // runtime challenge-mode lever
+	scrub       func(engage bool, reason string) error
 }
 
-func New(token, cfgPath string, bans *banlist.Store, reload Reloader, snapshot func() *config.Config, setChalMode func(bool)) *API {
-	return &API{token: token, bans: bans, reload: reload, cfgPath: cfgPath, snapshot: snapshot, setChalMode: setChalMode}
+func New(token, cfgPath string, bans *banlist.Store, reload Reloader, snapshot func() *config.Config, setChalMode func(bool), scrub func(bool, string) error) *API {
+	return &API{token: token, bans: bans, reload: reload, cfgPath: cfgPath, snapshot: snapshot, setChalMode: setChalMode, scrub: scrub}
 }
 
 // Register mounts the admin routes on mux.
@@ -50,6 +51,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/aggershield/admin/unban", a.auth(a.requirePost(a.handleUnban)))
 	mux.HandleFunc("/aggershield/admin/reload", a.auth(a.requirePost(a.handleReload)))
 	mux.HandleFunc("/aggershield/admin/mode", a.auth(a.requirePost(a.handleMode)))
+	mux.HandleFunc("/aggershield/admin/scrub", a.auth(a.requirePost(a.handleScrub)))
 }
 
 // auth wraps a handler with constant-time token verification.
@@ -130,6 +132,30 @@ func (a *API) handleMode(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "use ?challenge=always|adaptive", http.StatusBadRequest)
 	}
+}
+
+// handleScrub engages or disengages upstream/edge volumetric mitigation.
+func (a *API) handleScrub(w http.ResponseWriter, r *http.Request) {
+	if a.scrub == nil {
+		http.Error(w, "scrubber not configured", http.StatusServiceUnavailable)
+		return
+	}
+	var engage bool
+	switch r.URL.Query().Get("action") {
+	case "engage":
+		engage = true
+	case "disengage":
+		engage = false
+	default:
+		http.Error(w, "use ?action=engage|disengage", http.StatusBadRequest)
+		return
+	}
+	reason := r.URL.Query().Get("reason")
+	if err := a.scrub(engage, reason); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"engaged": engage, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"engaged": engage})
 }
 
 func (a *API) handleReload(w http.ResponseWriter, _ *http.Request) {

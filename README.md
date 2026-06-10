@@ -80,6 +80,7 @@ Server-level `Read/ReadHeader/Write/Idle` timeouts form the front line against s
 - `internal/tlsutil` — HTTPS termination (ACME/Let's Encrypt, cert files, or dev self-signed)
 - `internal/mcproxy` — protocol-aware Minecraft TCP proxy
 - `internal/fingerprint` — JA3/JA4 TLS client fingerprinting
+- `internal/scrubber` — upstream/edge mitigation adapters (webhook, Cloudflare)
 - `internal/license` — license key store + agent client (the licensing model)
 - `cmd/aggershield-server` — central control plane + admin dashboard
 - `client/` — agent installer scripts handed to users (`install.sh`/`.ps1`)
@@ -125,6 +126,7 @@ AggerShield listens on `:8080` (configurable) and proxies to `upstream`.
 | `block.status` / `block.message` | customise the response to blocked requests |
 | `tarpit` | `enabled`/`delay`/`max_concurrent` — hold blocked connections open instead of rejecting instantly |
 | `fingerprint` | `enabled`/`block`/`forward_header` — JA3/JA4 TLS fingerprinting (only when AggerShield terminates TLS) |
+| `scrubber` | `enabled`/`provider`/`webhook_url`/`cloudflare` — trigger upstream/edge volumetric mitigation |
 | `challenge.*` | PoW challenge (see above) incl. `pressure_threshold` for adaptive |
 | `admin.enabled` / `admin.token` | runtime control API (see below) |
 | `log.level` / `log.format` | `debug\|info\|warn\|error` and `text\|json` |
@@ -454,6 +456,29 @@ and **:443**. Issued certs are cached so restarts don't re-request them.
 > saturates the uplink upstream of any software. AggerShield owns the L7 +
 > connection layer; pair it with edge scrubbing for the volumetric layer.
 
+### Upstream scrubber integration (the volumetric layer)
+
+AggerShield can't *absorb* a volumetric flood, but it can **drive the edge that
+can**. With the `scrubber` block, when AggerShield (or the ML control plane)
+concludes a volumetric attack is underway it triggers upstream mitigation, and
+stands it down when the attack clears:
+
+- **`webhook`** — POSTs `{action: engage|disengage, reason, time}` to any URL.
+  Wire it to your own automation, a Cloudflare Worker, an OVH-API script, a
+  BGP/RTBH trigger, PagerDuty, etc.
+- **`cloudflare`** — flips the zone's Security Level to **`under_attack`** via
+  the Cloudflare API on engage, back to `normal_level` on disengage.
+
+Trigger it three ways: the **ML detector** (`detector.py --scrub` engages on
+attack, disengages on recovery), the admin API
+(`POST /aggershield/admin/scrub?action=engage|disengage`), or your own tooling.
+Exposed as `aggershield_scrub_engaged` (gauge) + `aggershield_scrub_actions_total`.
+
+```json
+"scrubber": { "enabled": true, "provider": "cloudflare",
+              "cloudflare": { "api_token": "…", "zone_id": "…" } }
+```
+
 ## Try the demo
 
 Three terminals (or build the binaries with `go build -o bin/ ./cmd/...`):
@@ -546,10 +571,13 @@ Done: the **L7 core** (rate limits, bans, conn caps, timeouts), the
 **HTTPS termination with multi-site host routing**, **automatic HTTPS
 (ACME/Let's Encrypt)**, the **Minecraft protocol-aware proxy**, the
 **ML/anomaly control plane** (EWMA live + XGBoost/CICDDoS2019 training),
-**tarpitting**, ban persistence + **fleet-shared threat intel**, and **JA3/JA4
-TLS fingerprinting**. Planned next:
+**tarpitting**, ban persistence + **fleet-shared threat intel**, **JA3/JA4
+TLS fingerprinting**, and **upstream-scrubber integration** (webhook / Cloudflare).
 
-1. **Upstream scrubbing integration** — OVH / Cloudflare / BGP blackhole APIs for the volumetric layer AggerShield can't absorb locally.
+The defensive feature roadmap is complete. Remaining work is hardening & ops:
+real at-scale load testing, an admin login page + audit log (vs HTTP Basic),
+a live ACME issuance test, a multi-node/Postgres control plane, and cutting a
+tagged `v0.1.0` release via the GoReleaser pipeline.
 
 ## License
 

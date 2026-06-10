@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -57,6 +58,7 @@ type Config struct {
 	Block       Block       `json:"block"`
 	Tarpit      Tarpit      `json:"tarpit"`
 	Fingerprint Fingerprint `json:"fingerprint"`
+	Scrubber    Scrubber    `json:"scrubber"`
 	Admin       Admin       `json:"admin"`
 	Log         Log         `json:"log"`
 	// Rules are per-route overrides, evaluated top-to-bottom; the first match
@@ -179,6 +181,28 @@ type Rule struct {
 type Block struct {
 	Status  int    `json:"status"`
 	Message string `json:"message"`
+}
+
+// Scrubber integrates with upstream/edge volumetric mitigation. AggerShield
+// (or the ML control plane) triggers it when it concludes a volumetric attack
+// is underway — the layer a host-based proxy can't absorb itself.
+type Scrubber struct {
+	Enabled  bool   `json:"enabled"`
+	Provider string `json:"provider"` // "webhook" (default) | "cloudflare"
+	// WebhookURL receives a JSON {action: engage|disengage, reason, time} POST.
+	WebhookURL string          `json:"webhook_url"`
+	Cloudflare CloudflareScrub `json:"cloudflare"`
+}
+
+// CloudflareScrub flips a Cloudflare zone's Security Level to "under_attack"
+// on engage and back to NormalLevel on disengage.
+type CloudflareScrub struct {
+	APIToken string `json:"api_token"`
+	ZoneID   string `json:"zone_id"`
+	// NormalLevel is the security level restored on disengage (default "medium").
+	NormalLevel string `json:"normal_level"`
+	// APIBase overrides the Cloudflare API base URL (for testing).
+	APIBase string `json:"api_base"`
 }
 
 // Fingerprint configures TLS client fingerprinting (JA3/JA4). Only works when
@@ -457,6 +481,20 @@ func (c *Config) validate() error {
 	}
 	if c.License.Enabled && (c.License.ServerURL == "" || c.License.Key == "") {
 		return fmt.Errorf("config: license.enabled requires server_url and key")
+	}
+	if c.Scrubber.Enabled {
+		switch strings.ToLower(c.Scrubber.Provider) {
+		case "cloudflare":
+			if c.Scrubber.Cloudflare.APIToken == "" || c.Scrubber.Cloudflare.ZoneID == "" {
+				return fmt.Errorf("config: scrubber cloudflare needs api_token and zone_id")
+			}
+		case "", "webhook":
+			if c.Scrubber.WebhookURL == "" {
+				return fmt.Errorf("config: scrubber webhook needs webhook_url")
+			}
+		default:
+			return fmt.Errorf("config: unknown scrubber.provider %q", c.Scrubber.Provider)
+		}
 	}
 	for i, r := range c.Rules {
 		switch r.Action {

@@ -27,6 +27,8 @@ type Metrics struct {
 	WouldBlock    atomic.Int64 // dry-run: decisions that would have blocked
 	Tarpitted     atomic.Int64 // blocked requests held in the tarpit
 	FpBlocked     atomic.Int64 // blocked by TLS fingerprint
+	ScrubActions  atomic.Int64 // upstream-scrubber engage/disengage calls
+	ScrubEngaged  atomic.Int64 // 1 while upstream scrubbing is engaged, else 0
 
 	// Minecraft proxy.
 	McConnTotal    atomic.Int64
@@ -100,6 +102,8 @@ func (m *Metrics) Prometheus(trackedFn func() int) http.HandlerFunc {
 		counter("aggershield_would_block_total", "Dry-run decisions that would have blocked", m.WouldBlock.Load())
 		counter("aggershield_tarpitted_total", "Blocked requests held in the tarpit", m.Tarpitted.Load())
 		counter("aggershield_fingerprint_blocked_total", "Requests blocked by TLS fingerprint", m.FpBlocked.Load())
+		counter("aggershield_scrub_actions_total", "Upstream-scrubber engage/disengage calls", m.ScrubActions.Load())
+		gauge("aggershield_scrub_engaged", "1 while upstream scrubbing is engaged", float64(m.ScrubEngaged.Load()))
 		counter("aggershield_mc_connections_total", "Minecraft connections seen", m.McConnTotal.Load())
 		counter("aggershield_mc_rejected_total", "Minecraft connections rejected", m.McConnRejected.Load())
 		gauge("aggershield_banned_ips", "Currently tracked banned IPs", float64(trackedFn()))
