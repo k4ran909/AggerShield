@@ -50,14 +50,15 @@ type Config struct {
 	Minecraft Minecraft `json:"minecraft"`
 	License   License   `json:"license"`
 
-	RateLimit  RateLimit  `json:"rate_limit"`
-	Ban        Ban        `json:"ban"`
-	Connection Connection `json:"connection"`
-	Challenge  Challenge  `json:"challenge"`
-	Block      Block      `json:"block"`
-	Tarpit     Tarpit     `json:"tarpit"`
-	Admin      Admin      `json:"admin"`
-	Log        Log        `json:"log"`
+	RateLimit   RateLimit   `json:"rate_limit"`
+	Ban         Ban         `json:"ban"`
+	Connection  Connection  `json:"connection"`
+	Challenge   Challenge   `json:"challenge"`
+	Block       Block       `json:"block"`
+	Tarpit      Tarpit      `json:"tarpit"`
+	Fingerprint Fingerprint `json:"fingerprint"`
+	Admin       Admin       `json:"admin"`
+	Log         Log         `json:"log"`
 	// Rules are per-route overrides, evaluated top-to-bottom; the first match
 	// wins. They let you protect specific endpoints (e.g. /login, /checkout)
 	// far more strictly than the global defaults.
@@ -178,6 +179,18 @@ type Rule struct {
 type Block struct {
 	Status  int    `json:"status"`
 	Message string `json:"message"`
+}
+
+// Fingerprint configures TLS client fingerprinting (JA3/JA4). Only works when
+// AggerShield terminates TLS directly (not behind a CDN that re-terminates TLS).
+type Fingerprint struct {
+	Enabled bool `json:"enabled"`
+	// Block lists JA3 and/or JA4 fingerprints to block outright (e.g. known
+	// bot/tool fingerprints).
+	Block []string `json:"block"`
+	// ForwardHeader sends X-AggerShield-JA3 / X-AggerShield-JA4 to the upstream
+	// so the app can use the fingerprint too.
+	ForwardHeader bool `json:"forward_header"`
 }
 
 // Tarpit slows down blocked requests instead of rejecting them instantly,

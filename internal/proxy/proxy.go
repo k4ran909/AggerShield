@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"aggershield/internal/config"
+	"aggershield/internal/fingerprint"
 	"aggershield/internal/netutil"
 )
 
@@ -34,8 +35,9 @@ type Router struct {
 func New(cfg *config.Config, log *slog.Logger) (*Router, error) {
 	rt := &Router{sites: make(map[string]http.Handler), log: log}
 
+	fwdFP := cfg.Fingerprint.Enabled && cfg.Fingerprint.ForwardHeader
 	for _, s := range cfg.Sites {
-		p, err := newReverseProxy(s.Upstream, s.PreserveHost, log)
+		p, err := newReverseProxy(s.Upstream, s.PreserveHost, fwdFP, log)
 		if err != nil {
 			return nil, err
 		}
@@ -45,7 +47,7 @@ func New(cfg *config.Config, log *slog.Logger) (*Router, error) {
 		// The default origin keeps the visitor's Host by default (suits a
 		// single self-hosted app); platform origins should use Sites with
 		// preserve_host:false.
-		p, err := newReverseProxy(cfg.Upstream, true, log)
+		p, err := newReverseProxy(cfg.Upstream, true, fwdFP, log)
 		if err != nil {
 			return nil, err
 		}
@@ -67,7 +69,7 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.ServeHTTP(w, r)
 }
 
-func newReverseProxy(upstream string, preserveHost bool, log *slog.Logger) (*httputil.ReverseProxy, error) {
+func newReverseProxy(upstream string, preserveHost, forwardFP bool, log *slog.Logger) (*httputil.ReverseProxy, error) {
 	target, err := url.Parse(upstream)
 	if err != nil {
 		return nil, err
@@ -87,6 +89,13 @@ func newReverseProxy(upstream string, preserveHost bool, log *slog.Logger) (*htt
 			if ip, ok := netutil.ClientIPFromContext(pr.In.Context()); ok {
 				pr.Out.Header.Set("X-Forwarded-For", ip)
 				pr.Out.Header.Set("X-Real-IP", ip)
+			}
+			// Forward the TLS fingerprint so the origin app can use it too.
+			if forwardFP {
+				if ja3, ja4, ok := fingerprint.FromContext(pr.In.Context()); ok {
+					pr.Out.Header.Set("X-AggerShield-JA3", ja3)
+					pr.Out.Header.Set("X-AggerShield-JA4", ja4)
+				}
 			}
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {

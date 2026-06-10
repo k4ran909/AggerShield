@@ -30,32 +30,47 @@ import (
 // *autocert.Manager (so the caller can wire its HTTP-01 challenge handler).
 // hosts are the site hostnames (used for the self-signed SANs or added to the
 // ACME allowlist). The manager is nil unless AutoCert is enabled.
-func Build(c config.TLS, hosts []string) (*tls.Config, *autocert.Manager, error) {
+//
+// chiHook, if non-nil, is invoked with every ClientHello (used for TLS
+// fingerprinting). It works across all three cert modes because we install it
+// via GetConfigForClient, which returns nil ("use this config") after observing.
+func Build(c config.TLS, hosts []string, chiHook func(*tls.ClientHelloInfo)) (*tls.Config, *autocert.Manager, error) {
+	var cfg *tls.Config
+	var mgr *autocert.Manager
+
 	if c.AutoCert.Enabled {
 		domains := dedupe(append(append([]string{}, c.AutoCert.Domains...), hosts...))
-		m := &autocert.Manager{
+		mgr = &autocert.Manager{
 			Prompt:     autocert.AcceptTOS,
 			Cache:      autocert.DirCache(c.AutoCert.CacheDir),
 			HostPolicy: autocert.HostWhitelist(domains...),
 			Email:      c.AutoCert.Email,
 		}
-		return m.TLSConfig(), m, nil
+		cfg = mgr.TLSConfig()
+	} else {
+		var cert tls.Certificate
+		var err error
+		if c.SelfSigned {
+			cert, err = selfSigned(hosts)
+		} else {
+			cert, err = tls.LoadX509KeyPair(c.CertFile, c.KeyFile)
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("tls: %w", err)
+		}
+		cfg = &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS12,
+		}
 	}
 
-	var cert tls.Certificate
-	var err error
-	if c.SelfSigned {
-		cert, err = selfSigned(hosts)
-	} else {
-		cert, err = tls.LoadX509KeyPair(c.CertFile, c.KeyFile)
+	if chiHook != nil {
+		cfg.GetConfigForClient = func(chi *tls.ClientHelloInfo) (*tls.Config, error) {
+			chiHook(chi)
+			return nil, nil // keep using cfg (its certs/GetCertificate still apply)
+		}
 	}
-	if err != nil {
-		return nil, nil, fmt.Errorf("tls: %w", err)
-	}
-	return &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS12,
-	}, nil, nil
+	return cfg, mgr, nil
 }
 
 func dedupe(in []string) []string {

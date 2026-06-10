@@ -79,6 +79,7 @@ Server-level `Read/ReadHeader/Write/Idle` timeouts form the front line against s
 - `internal/proxy` — multi-site host-routing reverse proxy (Host + forwarded headers)
 - `internal/tlsutil` — HTTPS termination (ACME/Let's Encrypt, cert files, or dev self-signed)
 - `internal/mcproxy` — protocol-aware Minecraft TCP proxy
+- `internal/fingerprint` — JA3/JA4 TLS client fingerprinting
 - `internal/license` — license key store + agent client (the licensing model)
 - `cmd/aggershield-server` — central control plane + admin dashboard
 - `client/` — agent installer scripts handed to users (`install.sh`/`.ps1`)
@@ -123,6 +124,7 @@ AggerShield listens on `:8080` (configurable) and proxies to `upstream`.
 | `bad_user_agents` | case-insensitive UA substrings to block |
 | `block.status` / `block.message` | customise the response to blocked requests |
 | `tarpit` | `enabled`/`delay`/`max_concurrent` — hold blocked connections open instead of rejecting instantly |
+| `fingerprint` | `enabled`/`block`/`forward_header` — JA3/JA4 TLS fingerprinting (only when AggerShield terminates TLS) |
 | `challenge.*` | PoW challenge (see above) incl. `pressure_threshold` for adaptive |
 | `admin.enabled` / `admin.token` | runtime control API (see below) |
 | `log.level` / `log.format` | `debug\|info\|warn\|error` and `text\|json` |
@@ -218,6 +220,29 @@ Agent config block:
   "fail_open": false
 }
 ```
+
+### TLS fingerprinting (JA3 / JA4)
+
+Bots routinely spoof a browser `User-Agent`, but their **TLS handshake** gives
+them away — curl, python-requests, Go, and bot frameworks each have a distinct
+ClientHello. With `fingerprint.enabled` (and `tls.enabled`), AggerShield
+computes the **JA3** and **JA4** fingerprint of every TLS client (GREASE-filtered
+so it stays stable) and can:
+
+- **block** clients whose JA3/JA4 is on `fingerprint.block` (e.g. known bot/tool fingerprints), and
+- **forward** the fingerprint to your origin as `X-AggerShield-JA3` / `X-AggerShield-JA4` (`forward_header`) so the app can use it.
+
+```jsonc
+"fingerprint": { "enabled": true, "forward_header": true,
+                 "block": ["80f376a4c80ffcd3bf69acb8b8cd1781"] }   // e.g. a curl JA3
+```
+
+Real example (curl over TLS): JA3 `80f376a4…`, JA4 `t13d2012h1_…` (TLS 1.3, SNI
+present, 20 ciphers, ALPN http/1.1). Exposed as `aggershield_fingerprint_blocked_total`.
+
+> ⚠️ Only works when **AggerShield terminates TLS directly**. Behind a CDN that
+> re-terminates TLS (e.g. Cloudflare), you'd see the CDN's fingerprint, not the
+> visitor's — use the CDN's own fingerprinting there.
 
 ### Tarpitting
 
@@ -519,12 +544,12 @@ and method matching, first-match-wins), and live hot-reload applying new rules.
 Done: the **L7 core** (rate limits, bans, conn caps, timeouts), the
 **proof-of-work challenge** layer, **per-route rules + hot-reload + admin API**,
 **HTTPS termination with multi-site host routing**, **automatic HTTPS
-(ACME/Let's Encrypt)**, the **Minecraft protocol-aware proxy**, and the
-**ML/anomaly control plane** (EWMA live + XGBoost/CICDDoS2019 training). Planned
-next:
+(ACME/Let's Encrypt)**, the **Minecraft protocol-aware proxy**, the
+**ML/anomaly control plane** (EWMA live + XGBoost/CICDDoS2019 training),
+**tarpitting**, ban persistence + **fleet-shared threat intel**, and **JA3/JA4
+TLS fingerprinting**. Planned next:
 
-1. **Behavioral fingerprinting** — JA3/JA4 TLS + HTTP/2 frame fingerprints to catch real-browser bots.
-2. **Upstream scrubbing integration** — OVH / Cloudflare / BGP blackhole APIs for the volumetric layer AggerShield can't absorb locally.
+1. **Upstream scrubbing integration** — OVH / Cloudflare / BGP blackhole APIs for the volumetric layer AggerShield can't absorb locally.
 
 ## License
 

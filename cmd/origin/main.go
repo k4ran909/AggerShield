@@ -18,8 +18,9 @@ func main() {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// Echo back routing-relevant details so demos can show host routing,
 		// preserve_host, and the forwarded client IP.
-		fmt.Fprintf(w, "origin=%s host=%s path=%s x-real-ip=%s\n",
-			*name, r.Host, r.URL.Path, r.Header.Get("X-Real-IP"))
+		fmt.Fprintf(w, "origin=%s host=%s path=%s x-real-ip=%s ja3=%s ja4=%s\n",
+			*name, r.Host, r.URL.Path, r.Header.Get("X-Real-IP"),
+			r.Header.Get("X-AggerShield-JA3"), r.Header.Get("X-AggerShield-JA4"))
 	})
 
 	log.Printf("origin %q listening on %s", *name, *addr)

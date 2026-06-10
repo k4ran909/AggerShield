@@ -56,6 +56,12 @@
     "max_concurrent": 4096
   },
 
+  "fingerprint": {
+    "enabled": false,
+    "forward_header": false,
+    "block": []
+  },
+
   "admin": {
     "enabled": false,
     "token": ""

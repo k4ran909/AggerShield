@@ -48,6 +48,9 @@ type Snapshot struct {
 
 	TarpitEnabled bool
 	TarpitDelay   time.Duration
+
+	FingerprintEnabled bool
+	FingerprintBlock   map[string]bool // JA3/JA4 fingerprints to block
 }
 
 // Build constructs a Snapshot from config. It creates fresh rate limiters
@@ -62,6 +65,13 @@ func Build(c *config.Config) (*Snapshot, error) {
 	badUAs := make([]string, 0, len(c.BadUserAgents))
 	for _, ua := range c.BadUserAgents {
 		badUAs = append(badUAs, strings.ToLower(ua))
+	}
+
+	fpBlock := make(map[string]bool, len(c.Fingerprint.Block))
+	for _, f := range c.Fingerprint.Block {
+		if f = strings.TrimSpace(f); f != "" {
+			fpBlock[f] = true
+		}
 	}
 
 	return &Snapshot{
@@ -84,6 +94,8 @@ func Build(c *config.Config) (*Snapshot, error) {
 		BlockMessage:        c.Block.Message,
 		TarpitEnabled:       c.Tarpit.Enabled,
 		TarpitDelay:         c.Tarpit.Delay.Std(),
+		FingerprintEnabled:  c.Fingerprint.Enabled,
+		FingerprintBlock:    fpBlock,
 	}, nil
 }
 

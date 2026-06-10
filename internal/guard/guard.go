@@ -35,6 +35,7 @@ import (
 	"aggershield/internal/challenge"
 	"aggershield/internal/config"
 	"aggershield/internal/connlimit"
+	"aggershield/internal/fingerprint"
 	"aggershield/internal/metrics"
 	"aggershield/internal/netutil"
 	"aggershield/internal/policy"
@@ -167,6 +168,19 @@ func (g *Guard) Wrap(next http.Handler) http.Handler {
 			if g.enforce(s, "denylist", ip, r) {
 				g.block(s, w, r)
 				return
+			}
+		}
+
+		// 3a. TLS fingerprint blocklist (JA3/JA4). Catches automated clients
+		// whose TLS stack is on the blocklist regardless of their User-Agent.
+		if s.FingerprintEnabled && len(s.FingerprintBlock) > 0 {
+			if ja3, ja4, ok := fingerprint.FromContext(r.Context()); ok &&
+				(s.FingerprintBlock[ja3] || s.FingerprintBlock[ja4]) {
+				if g.enforce(s, "tls-fingerprint", ip, r) {
+					g.metrics.FpBlocked.Add(1)
+					g.block(s, w, r)
+					return
+				}
 			}
 		}
 

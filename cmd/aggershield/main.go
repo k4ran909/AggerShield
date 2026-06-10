@@ -14,6 +14,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"log/slog"
 	"net"
@@ -30,6 +31,7 @@ import (
 	"aggershield/internal/challenge"
 	"aggershield/internal/config"
 	"aggershield/internal/connlimit"
+	"aggershield/internal/fingerprint"
 	"aggershield/internal/guard"
 	"aggershield/internal/license"
 	"aggershield/internal/mcproxy"
@@ -171,7 +173,16 @@ func main() {
 	var redirectSrv *http.Server
 
 	if cfg.TLS.Enabled {
-		tlsCfg, acmeMgr, err := tlsutil.Build(cfg.TLS, siteHosts(cfg))
+		// TLS fingerprinting (JA3/JA4) only works when we terminate TLS.
+		var chiHook func(*tls.ClientHelloInfo)
+		if cfg.Fingerprint.Enabled {
+			fp := fingerprint.New()
+			chiHook = fp.Observe
+			srv.ConnContext = fp.ConnContext
+			srv.ConnState = fp.ConnState
+			log.Info("TLS fingerprinting enabled (JA3/JA4)")
+		}
+		tlsCfg, acmeMgr, err := tlsutil.Build(cfg.TLS, siteHosts(cfg), chiHook)
 		if err != nil {
 			log.Error("tls", "err", err)
 			os.Exit(1)
