@@ -50,6 +50,12 @@
     "message": "Forbidden"
   },
 
+  "tarpit": {
+    "enabled": false,
+    "delay": "5s",
+    "max_concurrent": 4096
+  },
+
   "admin": {
     "enabled": false,
     "token": ""

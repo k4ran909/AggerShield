@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"aggershield/internal/banlist"
 	"aggershield/internal/challenge"
@@ -57,6 +58,10 @@ type Guard struct {
 	// runs unlicensed (standalone mode).
 	licenseEnforced bool
 	licensed        atomic.Bool
+
+	// tarpit is a bounded set of slots for holding blocked connections open.
+	// Bounding it stops the tarpit from exhausting our own file descriptors.
+	tarpit chan struct{}
 }
 
 // Deps bundles the long-lived components.
@@ -66,16 +71,22 @@ type Deps struct {
 	Conns     *connlimit.Limiter
 	Metrics   *metrics.Metrics
 	Log       *slog.Logger
+	TarpitMax int // max simultaneously tarpitted connections
 }
 
 // New builds a Guard with an initial policy snapshot.
 func New(d Deps, snap *policy.Snapshot) *Guard {
+	max := d.TarpitMax
+	if max <= 0 {
+		max = 4096
+	}
 	g := &Guard{
 		bans:    d.Bans,
 		chal:    d.Challenge,
 		conns:   d.Conns,
 		metrics: d.Metrics,
 		log:     d.Log,
+		tarpit:  make(chan struct{}, max),
 	}
 	g.snap.Store(snap)
 	return g
@@ -154,7 +165,7 @@ func (g *Guard) Wrap(next http.Handler) http.Handler {
 		// 3. Static denylist.
 		if netutil.Contains(s.DenyNets, ip) {
 			if g.enforce(s, "denylist", ip, r) {
-				g.block(s, w)
+				g.block(s, w, r)
 				return
 			}
 		}
@@ -167,7 +178,7 @@ func (g *Guard) Wrap(next http.Handler) http.Handler {
 			return
 		case rules.ActionBlock:
 			if g.enforce(s, "rule:"+decision.Name, ip, r) {
-				g.block(s, w)
+				g.block(s, w, r)
 				return
 			}
 		}
@@ -176,7 +187,7 @@ func (g *Guard) Wrap(next http.Handler) http.Handler {
 		if g.bans.IsBanned(ip) {
 			if g.enforce(s, "banned", ip, r) {
 				g.metrics.BlockedBanned.Add(1)
-				g.block(s, w)
+				g.block(s, w, r)
 				return
 			}
 		}
@@ -187,7 +198,7 @@ func (g *Guard) Wrap(next http.Handler) http.Handler {
 			for _, bad := range s.BadUAs {
 				if bad != "" && strings.Contains(ua, bad) {
 					if g.enforce(s, "bad-user-agent", ip, r) {
-						g.block(s, w)
+						g.block(s, w, r)
 						return
 					}
 					break
@@ -278,8 +289,26 @@ func acceptsHTML(r *http.Request) bool {
 	return strings.Contains(r.Header.Get("Accept"), "text/html")
 }
 
-// block writes the configured block response.
-func (g *Guard) block(s *policy.Snapshot, w http.ResponseWriter) {
+// block writes the configured block response. When tarpitting is enabled and a
+// slot is free, it first holds the connection open for TarpitDelay (or until
+// the client disconnects / the request is cancelled), wasting the attacker's
+// resources. If no slot is free it blocks immediately to protect our own fds.
+func (g *Guard) block(s *policy.Snapshot, w http.ResponseWriter, r *http.Request) {
+	if s.TarpitEnabled && s.TarpitDelay > 0 {
+		select {
+		case g.tarpit <- struct{}{}:
+			g.metrics.Tarpitted.Add(1)
+			t := time.NewTimer(s.TarpitDelay)
+			select {
+			case <-t.C:
+			case <-r.Context().Done():
+			}
+			t.Stop()
+			<-g.tarpit
+		default:
+			// tarpit full — fall through and block immediately
+		}
+	}
 	http.Error(w, s.BlockMessage, s.BlockStatus)
 }
 

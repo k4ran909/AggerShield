@@ -122,6 +122,7 @@ AggerShield listens on `:8080` (configurable) and proxies to `upstream`.
 | `denylist` | IPs/CIDRs always blocked outright |
 | `bad_user_agents` | case-insensitive UA substrings to block |
 | `block.status` / `block.message` | customise the response to blocked requests |
+| `tarpit` | `enabled`/`delay`/`max_concurrent` — hold blocked connections open instead of rejecting instantly |
 | `challenge.*` | PoW challenge (see above) incl. `pressure_threshold` for adaptive |
 | `admin.enabled` / `admin.token` | runtime control API (see below) |
 | `log.level` / `log.format` | `debug\|info\|warn\|error` and `text\|json` |
@@ -217,6 +218,23 @@ Agent config block:
   "fail_open": false
 }
 ```
+
+### Tarpitting
+
+Cleanly rejecting a malicious request is cheap for the attacker — they retry
+instantly. With `tarpit.enabled`, AggerShield instead **holds the connection
+open for `tarpit.delay` before sending the block**, so the attacker's socket is
+tied up while it costs us only a sleeping timer. `tarpit.max_concurrent` bounds
+how many connections we'll hold at once (so the tarpit can't exhaust our own
+file descriptors); over that, blocks return instantly.
+
+```
+legit request      → 200 in ~0.001s
+blocked (tarpitted) → 403 in ~3.0s   (attacker's connection held the whole time)
+```
+
+Tarpitting applies to every block reason (ban, denylist, rule-block, bad-UA),
+is hot-reloadable, and is exposed as `aggershield_tarpitted_total` in metrics.
 
 ### Shared threat intel (fleet bans) + ban persistence
 
@@ -505,10 +523,8 @@ Done: the **L7 core** (rate limits, bans, conn caps, timeouts), the
 **ML/anomaly control plane** (EWMA live + XGBoost/CICDDoS2019 training). Planned
 next:
 
-1. **CAPTCHA escalation** — when PoW alone isn't enough, escalate to a human check (hooks for hCaptcha/Turnstile).
-2. **Behavioral fingerprinting** — JA3/JA4 TLS + HTTP/2 frame fingerprints to catch real-browser bots.
-3. **Tarpitting** — hold malicious connections slow instead of cleanly rejecting (cost asymmetry).
-4. **Upstream scrubbing integration** — OVH / Cloudflare / BGP blackhole APIs for the volumetric layer AggerShield can't absorb locally.
+1. **Behavioral fingerprinting** — JA3/JA4 TLS + HTTP/2 frame fingerprints to catch real-browser bots.
+2. **Upstream scrubbing integration** — OVH / Cloudflare / BGP blackhole APIs for the volumetric layer AggerShield can't absorb locally.
 
 ## License
 

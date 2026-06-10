@@ -85,6 +85,7 @@ func main() {
 
 	g := guard.New(guard.Deps{
 		Bans: bans, Challenge: chal, Conns: conns, Metrics: mx, Log: log,
+		TarpitMax: cfg.Tarpit.MaxConcurrent,
 	}, snap)
 
 	// currentCfg holds the effective config for the admin /config endpoint and

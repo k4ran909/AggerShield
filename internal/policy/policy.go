@@ -45,6 +45,9 @@ type Snapshot struct {
 	MaxBodyBytes int64
 	BlockStatus  int
 	BlockMessage string
+
+	TarpitEnabled bool
+	TarpitDelay   time.Duration
 }
 
 // Build constructs a Snapshot from config. It creates fresh rate limiters
@@ -79,6 +82,8 @@ func Build(c *config.Config) (*Snapshot, error) {
 		MaxBodyBytes:        c.Connection.MaxBodyBytes,
 		BlockStatus:         c.Block.Status,
 		BlockMessage:        c.Block.Message,
+		TarpitEnabled:       c.Tarpit.Enabled,
+		TarpitDelay:         c.Tarpit.Delay.Std(),
 	}, nil
 }
 

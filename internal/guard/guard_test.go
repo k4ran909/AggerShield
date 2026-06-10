@@ -235,6 +235,34 @@ func TestChallengeSkipsNonBrowserByDefault(t *testing.T) {
 	}
 }
 
+func TestTarpitDelaysBlock(t *testing.T) {
+	cfg := &config.Config{Upstream: "http://x", Denylist: []string{"10.0.0.0/8"}}
+	cfg.RateLimit.PerIPRPS, cfg.RateLimit.PerIPBurst = 1000, 1000
+	cfg.Tarpit = config.Tarpit{Enabled: true, Delay: config.Duration(120 * time.Millisecond), MaxConcurrent: 16}
+	g := buildGuard(t, cfg, nil, false)
+	h := g.Wrap(okHandler())
+
+	// A denylisted IP is blocked, but only after the tarpit delay.
+	start := time.Now()
+	code := send(t, h, http.MethodGet, "/", "10.1.2.3", "")
+	elapsed := time.Since(start)
+	if code != http.StatusForbidden {
+		t.Fatalf("denylisted IP should be blocked (403), got %d", code)
+	}
+	if elapsed < 100*time.Millisecond {
+		t.Fatalf("tarpit should hold the response ~120ms, but returned in %v", elapsed)
+	}
+
+	// A normal IP is NOT delayed.
+	start = time.Now()
+	if c := send(t, h, http.MethodGet, "/", "203.0.113.9", ""); c != http.StatusOK {
+		t.Fatalf("normal IP got %d, want 200", c)
+	}
+	if d := time.Since(start); d > 50*time.Millisecond {
+		t.Fatalf("allowed request should not be tarpitted, took %v", d)
+	}
+}
+
 func TestLicenseGateFailsClosed(t *testing.T) {
 	cfg := &config.Config{Upstream: "http://x"}
 	cfg.RateLimit.PerIPRPS, cfg.RateLimit.PerIPBurst = 1000, 1000

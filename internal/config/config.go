@@ -55,6 +55,7 @@ type Config struct {
 	Connection Connection `json:"connection"`
 	Challenge  Challenge  `json:"challenge"`
 	Block      Block      `json:"block"`
+	Tarpit     Tarpit     `json:"tarpit"`
 	Admin      Admin      `json:"admin"`
 	Log        Log        `json:"log"`
 	// Rules are per-route overrides, evaluated top-to-bottom; the first match
@@ -177,6 +178,16 @@ type Rule struct {
 type Block struct {
 	Status  int    `json:"status"`
 	Message string `json:"message"`
+}
+
+// Tarpit slows down blocked requests instead of rejecting them instantly,
+// imposing cost on attackers (their connection is held open) while costing us
+// only a sleeping goroutine. MaxConcurrent bounds how many connections we'll
+// hold at once so we don't exhaust our own file descriptors.
+type Tarpit struct {
+	Enabled       bool     `json:"enabled"`
+	Delay         Duration `json:"delay"`
+	MaxConcurrent int      `json:"max_concurrent"`
 }
 
 // Admin configures the runtime control API (live ban/unban, reload, inspect).
@@ -371,6 +382,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Block.Message == "" {
 		c.Block.Message = "Forbidden"
+	}
+	if c.Tarpit.Delay == 0 {
+		c.Tarpit.Delay = Duration(5 * time.Second)
+	}
+	if c.Tarpit.MaxConcurrent == 0 {
+		c.Tarpit.MaxConcurrent = 4096
 	}
 	if c.Log.Level == "" {
 		c.Log.Level = "info"
