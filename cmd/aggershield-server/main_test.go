@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"html/template"
 	"io"
 	"log/slog"
 	"net/http"
@@ -10,8 +11,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"aggershield/internal/license"
+	"aggershield/internal/ratelimit"
 )
 
 func testLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -26,7 +29,13 @@ func newTestServer(t *testing.T) (*server, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &server{store: store, adminToken: "admintok", log: testLogger()}, plaintext
+	return &server{
+		store: store, adminToken: "admintok", log: testLogger(),
+		tmpl:          template.Must(template.New("dash").Funcs(tmplFuncs).Parse(dashboardHTML)),
+		sessionSecret: []byte("test-session-secret-0123456789ab"),
+		sessionTTL:    time.Hour,
+		loginLimiter:  ratelimit.NewPerIP(0.5, 5, 1000, time.Minute, time.Minute),
+	}, plaintext
 }
 
 func TestValidateAndHeartbeat(t *testing.T) {
@@ -120,6 +129,89 @@ func TestHeartbeatPushesPolicyOnVersionChange(t *testing.T) {
 	r1 := hb(1)
 	if r1.Policy != nil {
 		t.Fatalf("agent already at v1 should not receive a policy, got %+v", r1.Policy)
+	}
+}
+
+func TestAdminHTMLRequiresSession(t *testing.T) {
+	s, _ := newTestServer(t)
+	h := s.adminHTML(s.handleDashboard)
+
+	// No session cookie -> redirect to the login page.
+	rec := httptest.NewRecorder()
+	h(rec, httptest.NewRequest(http.MethodGet, "/admin", nil))
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/admin/login" {
+		t.Fatalf("unauthenticated /admin should redirect to /admin/login, got %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+
+	// With a valid session cookie -> served, with security headers.
+	rec = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: s.issueSession()})
+	h(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("valid session should be served, got %d", rec.Code)
+	}
+	if rec.Header().Get("X-Frame-Options") != "DENY" {
+		t.Fatal("security headers should be set on admin responses")
+	}
+}
+
+func TestLoginFlowAndRateLimit(t *testing.T) {
+	s, _ := newTestServer(t)
+
+	// Wrong token -> 401 and an audited failure.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/admin/login", strings.NewReader("token=wrong"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.RemoteAddr = "203.0.113.1:1111"
+	s.handleLoginPost(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong token should be 401, got %d", rec.Code)
+	}
+
+	// Correct token -> sets a session cookie.
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/admin/login", strings.NewReader("token=admintok"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.RemoteAddr = "203.0.113.2:2222"
+	s.handleLoginPost(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("correct token should redirect, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Header().Get("Set-Cookie"), sessionCookie+"=") {
+		t.Fatalf("a session cookie should be set, got %q", rec.Header().Get("Set-Cookie"))
+	}
+
+	// Brute force from one IP gets rate-limited (burst 5).
+	limited := false
+	for i := 0; i < 12; i++ {
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodPost, "/admin/login", strings.NewReader("token=x"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.RemoteAddr = "203.0.113.9:9999"
+		s.handleLoginPost(rec, req)
+		if rec.Code == http.StatusTooManyRequests {
+			limited = true
+			break
+		}
+	}
+	if !limited {
+		t.Fatal("repeated login attempts from one IP should be rate-limited")
+	}
+}
+
+func TestAuditRecorded(t *testing.T) {
+	s, _ := newTestServer(t)
+	// Generate a key via the handler -> should be audited.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/admin/keys", strings.NewReader("name=acme"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.RemoteAddr = "198.51.100.5:5555"
+	s.handleGenerate(rec, req)
+
+	log := s.store.AuditLog()
+	if len(log) == 0 || log[0].Action != "key.generate" || log[0].SourceIP != "198.51.100.5" {
+		t.Fatalf("key generation should be audited, got %+v", log)
 	}
 }
 

@@ -11,8 +11,12 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -21,6 +25,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +43,11 @@ type server struct {
 	// limiter throttles agent endpoints per source IP so a flood of bad keys
 	// can't abuse the control plane.
 	limiter *ratelimit.PerIP
+	// loginLimiter throttles admin login attempts per IP (anti brute-force).
+	loginLimiter *ratelimit.PerIP
+	// sessionSecret signs admin session cookies (random per process start).
+	sessionSecret []byte
+	sessionTTL    time.Duration
 	// Fleet blocklist tuning.
 	fleetTTL time.Duration
 	fleetMax int
@@ -67,14 +77,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		log.Error("session secret", "err", err)
+		os.Exit(1)
+	}
 	s := &server{
-		store:      store,
-		adminToken: *adminToken,
-		log:        log,
-		tmpl:       template.Must(template.New("dash").Funcs(tmplFuncs).Parse(dashboardHTML)),
-		limiter:    ratelimit.NewPerIP(*agentRPS, *agentBurst, 100000, 30*time.Second, 5*time.Minute),
-		fleetTTL:   *fleetTTL,
-		fleetMax:   *fleetMax,
+		store:         store,
+		adminToken:    *adminToken,
+		log:           log,
+		tmpl:          template.Must(template.New("dash").Funcs(tmplFuncs).Parse(dashboardHTML)),
+		limiter:       ratelimit.NewPerIP(*agentRPS, *agentBurst, 100000, 30*time.Second, 5*time.Minute),
+		loginLimiter:  ratelimit.NewPerIP(0.5, 5, 100000, time.Minute, 10*time.Minute), // ~5 tries then 1 / 2s
+		sessionSecret: secret,
+		sessionTTL:    12 * time.Hour,
+		fleetTTL:      *fleetTTL,
+		fleetMax:      *fleetMax,
 	}
 
 	if *certFile == "" {
@@ -89,7 +107,12 @@ func main() {
 	// Admin JSON API (admin-token header).
 	mux.HandleFunc("GET /api/v1/admin/keys", s.adminJSON(s.handleKeysJSON))
 	mux.HandleFunc("GET /api/v1/admin/agents", s.adminJSON(s.handleAgentsJSON))
-	// Admin dashboard (basic auth).
+	mux.HandleFunc("GET /api/v1/admin/audit", s.adminJSON(s.handleAuditJSON))
+	// Admin login (session-cookie). The login POST is rate-limited per IP.
+	mux.HandleFunc("GET /admin/login", s.handleLoginGet)
+	mux.HandleFunc("POST /admin/login", s.handleLoginPost)
+	mux.HandleFunc("POST /admin/logout", s.handleLogout)
+	// Admin dashboard (session-authenticated).
 	mux.HandleFunc("GET /admin", s.adminHTML(s.handleDashboard))
 	mux.HandleFunc("POST /admin/keys", s.adminHTML(s.handleGenerate))
 	mux.HandleFunc("POST /admin/keys/revoke", s.adminHTML(s.handleRevoke))
@@ -171,6 +194,10 @@ func (s *server) handleKeysJSON(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.store.Keys())
 }
 
+func (s *server) handleAuditJSON(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, s.store.AuditLog())
+}
+
 func (s *server) handleAgentsJSON(w http.ResponseWriter, _ *http.Request) {
 	keys := s.store.Keys()
 	agents := make([]*license.AgentStatus, 0, len(keys))
@@ -202,19 +229,22 @@ func (s *server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "name is required", http.StatusBadRequest)
 		return
 	}
-	plaintext, _, err := s.store.Generate(name, r.FormValue("note"))
+	plaintext, key, err := s.store.Generate(name, r.FormValue("note"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.store.Audit("key.generate", key.ID+" ("+name+")", hostOf(r.RemoteAddr))
 	s.render(w, plaintext, name)
 }
 
 func (s *server) handleRevoke(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.store.Revoke(r.FormValue("id")); err != nil {
+	id := r.FormValue("id")
+	if _, err := s.store.Revoke(id); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.store.Audit("key.revoke", id, hostOf(r.RemoteAddr))
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }
 
@@ -237,6 +267,7 @@ func (s *server) handleSetPolicy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.store.Audit("policy.set", id, hostOf(r.RemoteAddr))
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }
 
@@ -256,11 +287,16 @@ func (s *server) render(w http.ResponseWriter, newKey, newKeyName string) {
 			PolicyVersion: ver, PolicyJSON: pj,
 		})
 	}
+	audit := s.store.AuditLog()
+	if len(audit) > 20 {
+		audit = audit[:20] // show the 20 most recent on the dashboard
+	}
 	data := map[string]any{
 		"Rows":       rows,
 		"NewKey":     newKey,
 		"NewKeyName": newKeyName,
 		"Now":        time.Now().UTC().Format(time.RFC1123),
+		"Audit":      audit,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tmpl.Execute(w, data); err != nil {
@@ -268,18 +304,95 @@ func (s *server) render(w http.ResponseWriter, newKey, newKeyName string) {
 	}
 }
 
+// ---- session login ----
+
+const sessionCookie = "ags_session"
+
+// issueSession returns a signed session value "exp.hexsig" valid for sessionTTL.
+func (s *server) issueSession() string {
+	exp := strconv.FormatInt(time.Now().Add(s.sessionTTL).Unix(), 10)
+	mac := hmac.New(sha256.New, s.sessionSecret)
+	mac.Write([]byte(exp))
+	return exp + "." + hex.EncodeToString(mac.Sum(nil))
+}
+
+func (s *server) validSession(r *http.Request) bool {
+	ck, err := r.Cookie(sessionCookie)
+	if err != nil {
+		return false
+	}
+	exp, sig, ok := strings.Cut(ck.Value, ".")
+	if !ok {
+		return false
+	}
+	mac := hmac.New(sha256.New, s.sessionSecret)
+	mac.Write([]byte(exp))
+	want := hex.EncodeToString(mac.Sum(nil))
+	if subtle.ConstantTimeCompare([]byte(sig), []byte(want)) != 1 {
+		return false
+	}
+	ts, err := strconv.ParseInt(exp, 10, 64)
+	return err == nil && time.Now().Unix() < ts
+}
+
+func (s *server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
+	if s.validSession(r) {
+		http.Redirect(w, r, "/admin", http.StatusSeeOther)
+		return
+	}
+	s.securityHeaders(w)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(loginHTML))
+}
+
+func (s *server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
+	ip := hostOf(r.RemoteAddr)
+	if !s.loginLimiter.Allow(ip) {
+		w.Header().Set("Retry-After", "2")
+		http.Error(w, "too many login attempts", http.StatusTooManyRequests)
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(r.FormValue("token")), []byte(s.adminToken)) != 1 {
+		s.store.Audit("login.fail", "", ip)
+		s.log.Warn("admin login failed", "ip", ip)
+		http.Error(w, "invalid token", http.StatusUnauthorized)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name: sessionCookie, Value: s.issueSession(), Path: "/",
+		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: r.TLS != nil,
+		MaxAge: int(s.sessionTTL.Seconds()),
+	})
+	s.store.Audit("login.ok", "", ip)
+	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+}
+
+func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true})
+	http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
+}
+
 // ---- auth middleware ----
 
 func (s *server) adminHTML(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, pass, ok := r.BasicAuth()
-		if !ok || subtle.ConstantTimeCompare([]byte(pass), []byte(s.adminToken)) != 1 {
-			w.Header().Set("WWW-Authenticate", `Basic realm="AggerShield admin"`)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		if !s.validSession(r) {
+			http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
 			return
 		}
+		s.securityHeaders(w)
 		next(w, r)
 	}
+}
+
+// securityHeaders sets conservative headers on admin HTML responses.
+func (s *server) securityHeaders(w http.ResponseWriter) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	// The dashboard is a single self-contained page with inline styles + a small
+	// inline confirm handler, so inline is allowed; everything else is 'self'.
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
 }
 
 // rateLimited throttles a handler per source IP (agent-endpoint abuse guard).

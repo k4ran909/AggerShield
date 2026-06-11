@@ -47,6 +47,9 @@ type data struct {
 	// expiry. Version moves when the set of IPs changes.
 	Fleet        map[string]time.Time `json:"fleet"`
 	FleetVersion int                  `json:"fleet_version"`
+
+	// Audit is a capped, append-only trail of admin actions.
+	Audit []AuditEntry `json:"audit"`
 }
 
 // Store is a concurrency-safe, file-backed license store.

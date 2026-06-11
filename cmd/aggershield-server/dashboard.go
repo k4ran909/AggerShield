@@ -26,6 +26,7 @@ form.inline{display:inline}.row-form{display:flex;gap:8px;flex-wrap:wrap;align-i
 .mut{color:var(--mut)}.mono{font-family:ui-monospace,monospace}
 </style></head>
 <body><div class="wrap">
+<form method="post" action="/admin/logout" style="float:right"><button class="danger" type="submit">Log out</button></form>
 <h1>🛡️ AggerShield — Control Panel</h1>
 <div class="sub">License keys, live agents, and where your protection is running. · {{.Now}}</div>
 
@@ -88,4 +89,44 @@ form.inline{display:inline}.row-form{display:flex;gap:8px;flex-wrap:wrap;align-i
     </tbody>
   </table>
 </div>
+
+<div class="card">
+  <strong>Audit log</strong> <span class="mut">(20 most recent admin actions)</span>
+  <table style="margin-top:10px">
+    <thead><tr><th>Time (UTC)</th><th>Action</th><th>Target</th><th>Source IP</th></tr></thead>
+    <tbody>
+    {{range .Audit}}
+      <tr>
+        <td class="mono mut">{{.Time.Format "2006-01-02 15:04:05"}}</td>
+        <td class="mono">{{.Action}}</td>
+        <td>{{.Target}}</td>
+        <td class="mono">{{.SourceIP}}</td>
+      </tr>
+    {{else}}
+      <tr><td colspan="4" class="mut">No admin actions recorded yet.</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+</div>
 </div></body></html>`
+
+// loginHTML is the admin login page (posts the token to set a session cookie).
+const loginHTML = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AggerShield — Sign in</title>
+<style>
+body{margin:0;background:#0f1115;color:#e6e8ec;font:14px/1.5 system-ui,sans-serif;
+  display:flex;min-height:100vh;align-items:center;justify-content:center}
+.box{background:#181b22;border:1px solid #272b34;border-radius:12px;padding:28px;width:20rem}
+h1{font-size:18px;margin:0 0 4px}.mut{color:#9aa3b2;font-size:13px;margin-bottom:18px}
+input{width:100%;box-sizing:border-box;background:#0b0d11;border:1px solid #272b34;color:#e6e8ec;
+  border-radius:8px;padding:10px;margin-bottom:12px}
+button{width:100%;background:#4ea1ff;border:0;color:#04101f;font-weight:700;border-radius:8px;padding:10px;cursor:pointer}
+</style></head>
+<body><form class="box" method="post" action="/admin/login">
+  <h1>🛡️ AggerShield</h1>
+  <div class="mut">Enter the admin token to sign in.</div>
+  <input type="password" name="token" placeholder="Admin token" autofocus required>
+  <button type="submit">Sign in</button>
+</form></body></html>`

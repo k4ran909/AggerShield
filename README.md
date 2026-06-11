@@ -192,12 +192,21 @@ never get your source.
 
 ```bash
 go run ./cmd/aggershield-server -admin-token "$(openssl rand -hex 16)"
-# dashboard at http://localhost:9000/admin  (Basic auth: any user, password = token)
+# dashboard at http://localhost:9000/admin  (sign in at /admin/login with the token)
 ```
 
 The dashboard lists every key, its status, and the live agent using it — the
 **hostname, source IP, what it's protecting, last-seen, and request/ban
 counts**. Issue a key with the form; revoke with one click.
+
+**Control-plane auth hardening:** the dashboard uses a **session-cookie login**
+(`/admin/login`, signed HMAC cookie, `/admin/logout`), not per-request Basic
+auth. Login attempts are **per-IP rate-limited** (anti brute-force), every admin
+action (`key.generate`, `key.revoke`, `policy.set`, `login.ok/fail`) is written
+to a persisted **audit trail** (`GET /api/v1/admin/audit`), and admin responses
+carry security headers (CSP, `X-Frame-Options: DENY`, `nosniff`). The JSON admin
+API still uses the `X-AggerShield-Admin` header for scripts/automation. Run it
+behind TLS (`-cert`/`-key`) in production.
 
 **2. Give a user their key + the agent.** They run `client/install.sh`
 (or `install.ps1`) with their key:
@@ -574,10 +583,11 @@ Done: the **L7 core** (rate limits, bans, conn caps, timeouts), the
 **tarpitting**, ban persistence + **fleet-shared threat intel**, **JA3/JA4
 TLS fingerprinting**, and **upstream-scrubber integration** (webhook / Cloudflare).
 
-The defensive feature roadmap is complete. Remaining work is hardening & ops:
-real at-scale load testing, an admin login page + audit log (vs HTTP Basic),
-a live ACME issuance test, a multi-node/Postgres control plane, and cutting a
-tagged `v0.1.0` release via the GoReleaser pipeline.
+The defensive feature roadmap is complete, and the control plane now has
+**session-login auth + per-IP login rate-limiting + an audit trail**. Remaining
+work is hardening & ops: real at-scale load testing, a live ACME issuance test,
+mTLS/key-rotation between agent and control plane, a multi-node/Postgres control
+plane, and cutting a tagged `v0.1.0` release via the GoReleaser pipeline.
 
 ## License
 
