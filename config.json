@@ -69,6 +69,13 @@
     "cloudflare": { "api_token": "", "zone_id": "", "normal_level": "medium" }
   },
 
+  "monitor": {
+    "sample_interval": "1s",
+    "retain": 3600,
+    "attack_threshold": 20,
+    "exit_intervals": 5
+  },
+
   "admin": {
     "enabled": false,
     "token": ""

@@ -40,6 +40,7 @@ import (
 	"aggershield/internal/policy"
 	"aggershield/internal/proxy"
 	"aggershield/internal/scrubber"
+	"aggershield/internal/secmon"
 	"aggershield/internal/tlsutil"
 )
 
@@ -71,6 +72,23 @@ func main() {
 	}
 	conns := connlimit.New(cfg.Connection.MaxPerIP)
 	mx := metrics.New()
+
+	// Always-on security monitor: per-interval traffic time-series + automatic
+	// attack-event detection (behind the /aggershield/security dashboard).
+	mon := secmon.New(cfg.Monitor.SampleInterval.Std(), cfg.Monitor.Retain,
+		cfg.Monitor.AttackThreshold, cfg.Monitor.ExitIntervals,
+		func() secmon.Counters {
+			return secmon.Counters{
+				Total:   mx.Total.Load(),
+				Allowed: mx.Allowed.Load(),
+				Blocked: mx.BlockedBanned.Load() + mx.RateLimitedIP.Load() +
+					mx.RateLimitedGl.Load() + mx.ConnRejected.Load() + mx.FpBlocked.Load(),
+				Challenged: mx.Challenged.Load(),
+				Bans:       mx.BansIssued.Load(),
+			}
+		})
+	go mon.Run()
+	defer mon.Close()
 	// Always build the challenge manager; whether it's used is a policy flag,
 	// so toggling challenge.enabled on reload Just Works.
 	chal := challenge.New(cfg.Challenge.Secret, cfg.Challenge.DifficultyBits, cfg.Challenge.ClearanceTTL.Std())
@@ -158,6 +176,9 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/aggershield/stats", mx.Handler(bans.Count))
 	mux.HandleFunc("/metrics", mx.Prometheus(bans.Count))
+	mux.HandleFunc("/aggershield/security", mon.DashboardHandler())
+	mux.HandleFunc("/aggershield/timeseries", mon.SamplesHandler())
+	mux.HandleFunc("/aggershield/events", mon.EventsHandler())
 	mux.HandleFunc("/aggershield/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

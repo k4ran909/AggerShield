@@ -59,6 +59,7 @@ type Config struct {
 	Tarpit      Tarpit      `json:"tarpit"`
 	Fingerprint Fingerprint `json:"fingerprint"`
 	Scrubber    Scrubber    `json:"scrubber"`
+	Monitor     Monitor     `json:"monitor"`
 	Admin       Admin       `json:"admin"`
 	Log         Log         `json:"log"`
 	// Rules are per-route overrides, evaluated top-to-bottom; the first match
@@ -181,6 +182,20 @@ type Rule struct {
 type Block struct {
 	Status  int    `json:"status"`
 	Message string `json:"message"`
+}
+
+// Monitor configures the always-on security monitor (traffic time-series +
+// automatic attack-event detection behind the security dashboard).
+type Monitor struct {
+	// SampleInterval is how often traffic is sampled. Default 1s.
+	SampleInterval Duration `json:"sample_interval"`
+	// Retain bounds how many samples are kept (the chart window). Default 3600.
+	Retain int `json:"retain"`
+	// AttackThreshold is the blocked-requests-per-interval that opens an attack
+	// event. Default 20.
+	AttackThreshold int64 `json:"attack_threshold"`
+	// ExitIntervals is how many quiet intervals close an attack event. Default 5.
+	ExitIntervals int `json:"exit_intervals"`
 }
 
 // Scrubber integrates with upstream/edge volumetric mitigation. AggerShield
@@ -431,6 +446,18 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Log.Format == "" {
 		c.Log.Format = "text"
+	}
+	if c.Monitor.SampleInterval == 0 {
+		c.Monitor.SampleInterval = Duration(time.Second)
+	}
+	if c.Monitor.Retain == 0 {
+		c.Monitor.Retain = 3600
+	}
+	if c.Monitor.AttackThreshold == 0 {
+		c.Monitor.AttackThreshold = 20
+	}
+	if c.Monitor.ExitIntervals == 0 {
+		c.Monitor.ExitIntervals = 5
 	}
 	if c.TLS.HTTPSListen == "" {
 		c.TLS.HTTPSListen = ":443"

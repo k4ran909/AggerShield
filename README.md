@@ -81,6 +81,7 @@ Server-level `Read/ReadHeader/Write/Idle` timeouts form the front line against s
 - `internal/mcproxy` — protocol-aware Minecraft TCP proxy
 - `internal/fingerprint` — JA3/JA4 TLS client fingerprinting
 - `internal/scrubber` — upstream/edge mitigation adapters (webhook, Cloudflare)
+- `internal/secmon` — always-on traffic time-series + attack-event detection + security dashboard
 - `internal/license` — license key store + agent client (the licensing model)
 - `cmd/aggershield-server` — central control plane + admin dashboard
 - `client/` — agent installer scripts handed to users (`install.sh`/`.ps1`)
@@ -464,6 +465,29 @@ and **:443**. Issued certs are cached so restarts don't re-request them.
 > ⚠️ **Reminder:** a single host can't absorb a volumetric L3/L4 flood — that
 > saturates the uplink upstream of any software. AggerShield owns the L7 +
 > connection layer; pair it with edge scrubbing for the volumetric layer.
+
+### Network Security dashboard (always-on monitor)
+
+AggerShield runs an always-on **security monitor** (an OVH-VAC-style detection
+lifecycle, minus the physical Tbit/s scrubbing — that lives at the edge). It
+samples traffic every interval into a time-series, **automatically opens and
+closes attack events** (with peak rate, duration, total blocked), and tracks a
+live mitigation **state** (`normal` / `under_attack`):
+
+- **`GET /aggershield/security`** — live HTML dashboard: state badge, inline-SVG
+  traffic charts (requests/iv, blocked/iv), and the **attack activity log**
+  (auto-refreshes every 5s).
+- **`GET /aggershield/timeseries`** — the raw per-interval samples (JSON).
+- **`GET /aggershield/events`** — the attack-event log (JSON, newest first).
+
+```json
+"monitor": { "sample_interval": "1s", "retain": 3600, "attack_threshold": 20, "exit_intervals": 5 }
+```
+
+`attack_threshold` is the blocked-requests-per-interval that opens an event;
+`exit_intervals` is how many quiet intervals close it; `retain` bounds the
+chart window. This is the software half of OVH's "Network Security Dashboard —
+activity logs, dynamic traffic charts, statistics."
 
 ### Upstream scrubber integration (the volumetric layer)
 
