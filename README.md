@@ -480,6 +480,12 @@ live mitigation **state** (`normal` / `under_attack`):
 - **`GET /aggershield/timeseries`** — the raw per-interval samples (JSON).
 - **`GET /aggershield/events`** — the attack-event log (JSON, newest first).
 
+> 🔒 These telemetry endpoints (plus `/aggershield/stats` and `/metrics`) are
+> **read-only but public** by default. When AggerShield faces the internet, set
+> `admin.protect_telemetry: true` to require the admin token on them — pass it as
+> the `X-AggerShield-Token` header, or open the dashboard in a browser with
+> `?token=...`. `/aggershield/health` stays open for uptime checks.
+
 ```json
 "monitor": { "sample_interval": "1s", "retain": 3600, "attack_threshold": 20, "exit_intervals": 5 }
 ```

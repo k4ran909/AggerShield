@@ -14,6 +14,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"errors"
 	"flag"
@@ -174,11 +175,18 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/aggershield/stats", mx.Handler(bans.Count))
-	mux.HandleFunc("/metrics", mx.Prometheus(bans.Count))
-	mux.HandleFunc("/aggershield/security", mon.DashboardHandler())
-	mux.HandleFunc("/aggershield/timeseries", mon.SamplesHandler())
-	mux.HandleFunc("/aggershield/events", mon.EventsHandler())
+	// Read-only telemetry endpoints. Optionally gated behind the admin token so
+	// they aren't world-readable when AggerShield faces the internet.
+	gate := func(h http.HandlerFunc) http.HandlerFunc { return h }
+	if cfg.Admin.ProtectTelemetry && cfg.Admin.Token != "" {
+		gate = func(h http.HandlerFunc) http.HandlerFunc { return telemetryGate(cfg.Admin.Token, h) }
+		log.Info("telemetry endpoints require the admin token (header X-AggerShield-Token or ?token=)")
+	}
+	mux.HandleFunc("/aggershield/stats", gate(mx.Handler(bans.Count)))
+	mux.HandleFunc("/metrics", gate(mx.Prometheus(bans.Count)))
+	mux.HandleFunc("/aggershield/security", gate(mon.DashboardHandler()))
+	mux.HandleFunc("/aggershield/timeseries", gate(mon.SamplesHandler()))
+	mux.HandleFunc("/aggershield/events", gate(mon.EventsHandler()))
 	mux.HandleFunc("/aggershield/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -444,6 +452,23 @@ func statsMap(mx *metrics.Metrics) map[string]int64 {
 		"blocked_banned": mx.BlockedBanned.Load(),
 		"bans_issued":    mx.BansIssued.Load(),
 		"challenged":     mx.Challenged.Load(),
+	}
+}
+
+// telemetryGate requires the admin token (X-AggerShield-Token header or ?token=)
+// before serving a read-only telemetry endpoint. The query param lets you open
+// the dashboard in a browser: https://host/aggershield/security?token=...
+func telemetryGate(token string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		got := r.Header.Get("X-AggerShield-Token")
+		if got == "" {
+			got = r.URL.Query().Get("token")
+		}
+		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
 	}
 }
 

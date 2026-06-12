@@ -37,6 +37,6 @@
 
   "monitor": { "sample_interval": "1s", "retain": 3600, "attack_threshold": 20, "exit_intervals": 5 },
 
-  "admin": { "enabled": true, "token": "CHANGE_ME_TO_A_LONG_RANDOM_SECRET" },
+  "admin": { "enabled": true, "token": "CHANGE_ME_TO_A_LONG_RANDOM_SECRET", "protect_telemetry": true },
   "log": { "level": "info", "format": "json" }
 }

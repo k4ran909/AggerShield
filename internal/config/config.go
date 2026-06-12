@@ -248,6 +248,11 @@ type Admin struct {
 	// Token must be sent as the X-AggerShield-Token header. Required when
 	// Enabled; mutating endpoints are refused if it is empty.
 	Token string `json:"token"`
+	// ProtectTelemetry also requires the admin token (header X-AggerShield-Token
+	// or ?token=) on the read-only dashboards/metrics — /aggershield/security,
+	// /stats, /timeseries, /events and /metrics — so they aren't world-readable.
+	// Recommended when AggerShield is exposed to the internet.
+	ProtectTelemetry bool `json:"protect_telemetry"`
 }
 
 // Log configures structured logging.
