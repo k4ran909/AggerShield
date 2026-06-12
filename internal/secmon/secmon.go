@@ -30,14 +30,16 @@ type Sample struct {
 	Bans       int64     `json:"bans"`
 }
 
-// Event is one detected attack/mitigation episode.
+// Event is one detected attack/mitigation episode. "Mitigated" counts both
+// blocked AND challenged requests — under a botnet the proof-of-work challenge
+// is the main line of defence, so it must count toward attack detection.
 type Event struct {
-	Start        time.Time `json:"start"`
-	End          time.Time `json:"end,omitempty"` // zero while ongoing
-	PeakReqs     int64     `json:"peak_reqs"`     // peak requests/interval
-	PeakBlocked  int64     `json:"peak_blocked"`  // peak blocked/interval
-	TotalBlocked int64     `json:"total_blocked"`
-	Reason       string    `json:"reason"`
+	Start          time.Time `json:"start"`
+	End            time.Time `json:"end,omitempty"`   // zero while ongoing
+	PeakReqs       int64     `json:"peak_reqs"`       // peak requests/interval
+	PeakMitigated  int64     `json:"peak_mitigated"`  // peak (blocked+challenged)/interval
+	TotalMitigated int64     `json:"total_mitigated"` // total blocked+challenged
+	Reason         string    `json:"reason"`
 }
 
 // Ongoing reports whether the event has not yet ended.
@@ -134,13 +136,16 @@ func (m *Monitor) tick(now time.Time) {
 	m.detect(s, now)
 }
 
-// detect opens/closes attack events based on the blocked rate.
+// detect opens/closes attack events based on the mitigation rate — both
+// blocked AND challenged requests (the PoW challenge is the primary botnet
+// defence, so a challenge spike means we're under attack just as a block spike does).
 func (m *Monitor) detect(s Sample, now time.Time) {
+	mit := s.Blocked + s.Challenged
 	if !m.inAttack {
-		if s.Blocked >= m.attackBlocked {
+		if mit >= m.attackBlocked {
 			m.inAttack = true
 			m.calm = 0
-			m.cur = Event{Start: now, Reason: "elevated block rate", PeakReqs: s.Reqs, PeakBlocked: s.Blocked, TotalBlocked: s.Blocked}
+			m.cur = Event{Start: now, Reason: "elevated block/challenge rate", PeakReqs: s.Reqs, PeakMitigated: mit, TotalMitigated: mit}
 		}
 		return
 	}
@@ -148,12 +153,12 @@ func (m *Monitor) detect(s Sample, now time.Time) {
 	if s.Reqs > m.cur.PeakReqs {
 		m.cur.PeakReqs = s.Reqs
 	}
-	if s.Blocked > m.cur.PeakBlocked {
-		m.cur.PeakBlocked = s.Blocked
+	if mit > m.cur.PeakMitigated {
+		m.cur.PeakMitigated = mit
 	}
-	m.cur.TotalBlocked += s.Blocked
+	m.cur.TotalMitigated += mit
 
-	if s.Blocked < m.attackBlocked {
+	if mit < m.attackBlocked {
 		m.calm++
 		if m.calm >= m.exitTicks {
 			m.cur.End = now

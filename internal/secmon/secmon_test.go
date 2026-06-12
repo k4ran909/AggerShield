@@ -71,11 +71,33 @@ func TestAttackEventOpensAndCloses(t *testing.T) {
 	if ev[0].Ongoing() {
 		t.Fatal("event should be closed")
 	}
-	if ev[0].PeakBlocked != 60 {
-		t.Fatalf("peak blocked should be 60, got %d", ev[0].PeakBlocked)
+	if ev[0].PeakMitigated != 60 {
+		t.Fatalf("peak mitigated should be 60, got %d", ev[0].PeakMitigated)
 	}
-	if ev[0].TotalBlocked != 110 { // 50 + 60
-		t.Fatalf("total blocked should be 110, got %d", ev[0].TotalBlocked)
+	if ev[0].TotalMitigated != 110 { // 50 + 60
+		t.Fatalf("total mitigated should be 110, got %d", ev[0].TotalMitigated)
+	}
+}
+
+// TestChallengesAloneOpenEvent is the case a real two-VPS test exposed: under a
+// botnet the requests are CHALLENGED, not blocked, so challenges must count
+// toward attack detection or the event log stays empty.
+func TestChallengesAloneOpenEvent(t *testing.T) {
+	d := &driver{}
+	m := newTestMonitor(d, 20, 2)
+	base := time.Now()
+	m.tick(base) // seed
+
+	// Pure challenge traffic, no blocks at all.
+	d.c.Total += 500
+	d.c.Challenged += 200
+	m.tick(base.Add(time.Second))
+
+	if m.State() != "under_attack" {
+		t.Fatal("a challenge spike (no blocks) must still open an attack event")
+	}
+	if ev := m.Events(); len(ev) == 0 || ev[0].PeakMitigated < 200 {
+		t.Fatalf("event should record the challenge volume, got %+v", ev)
 	}
 }
 

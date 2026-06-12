@@ -70,7 +70,7 @@ func (m *Monitor) DashboardHandler() http.HandlerFunc {
 			fmt.Fprintf(&rows,
 				`<tr><td class="mono">%s</td><td class="mono">%s</td><td>%s</td><td class="mono">%d</td><td class="mono">%d</td></tr>`,
 				e.Start.UTC().Format("2006-01-02 15:04:05"), end, dur.Round(time.Second),
-				e.PeakReqs, e.TotalBlocked)
+				e.PeakReqs, e.TotalMitigated)
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -155,7 +155,7 @@ th{color:var(--mut);font-weight:600;font-size:12px;text-transform:uppercase}
 <div class="card">
   <strong>Attack activity log</strong>
   <table style="margin-top:10px">
-    <thead><tr><th>Started (UTC)</th><th>Ended</th><th>Duration</th><th>Peak req/iv</th><th>Total blocked</th></tr></thead>
+    <thead><tr><th>Started (UTC)</th><th>Ended</th><th>Duration</th><th>Peak req/iv</th><th>Total mitigated</th></tr></thead>
     <tbody>%s</tbody>
   </table>
 </div>
