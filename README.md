@@ -6,6 +6,8 @@ A cross-platform **Layer-7 (application-layer) DDoS protection reverse proxy**, 
 
 **Data-plane performance:** ~**522 ns/request** through the full guard pipeline (≈1.9M req/s per core, single-threaded; `go test -bench=. ./internal/guard`).
 
+📘 **Guides:** [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (DigitalOcean + Cloudflare, step-by-step + troubleshooting) · [docs/TESTING.md](docs/TESTING.md) (stress/resilience testing, safely, on your own infra).
+
 > **Scope, stated honestly.** A piece of software running on (or in front of) your server **cannot stop a volumetric L3/L4 flood.** If a botnet throws 500 Gbps at a 1–10 Gbps uplink, the pipe is saturated *upstream of you* — no host-based tool can fix a full pipe. That class of attack is handled at the network edge (OVH VAC, Cloudflare, AWS Shield, BGP blackholing). AggerShield defends the layer it actually can: **L7 + connection level.** For volumetric protection, pair it with an upstream scrubber.
 
 ## Why per-IP rate limiting alone is not enough
