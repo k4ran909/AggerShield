@@ -18,8 +18,9 @@ challenge, per-route rules, tarpit, fleet bans, the security monitor). For the
 *volumetric* layer AggerShield can also **trigger** edge mitigation via its
 scrubber integration, but the absorption itself happens at the edge.
 
-> Tested on: Ubuntu 24.04 (x86_64), DigitalOcean droplet `159.65.24.241`,
-> domain `ddos.o3dn.info` on Cloudflare, app on `127.0.0.1:3000`.
+> Tested on: Ubuntu 24.04 (x86_64), a DigitalOcean droplet behind Cloudflare,
+> app on `127.0.0.1:3000`. (Use your own droplet IP / domain below — never
+> publish your origin IP, or attackers can bypass Cloudflare and hit it directly.)
 
 ---
 

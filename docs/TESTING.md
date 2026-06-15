@@ -82,8 +82,8 @@ pkill -f "aggershield -config /tmp/loadtest.json"; pkill -f "http.server 3001"
 
 ## 4. Method B — two-VPS distributed test (real network)
 
-Target = AggerShield box; load = a **second VPS you own**. This is what was run
-against `159.65.24.241` (target) from `140.238.252.217` (load).
+Target = AggerShield box; load = a **second VPS you own**. (Use your own IPs;
+substitute `<TARGET_IP>` and `<LOAD_VPS_IP>` below.)
 
 ### 4.1 On the TARGET (AggerShield box)
 ```bash
